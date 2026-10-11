@@ -339,7 +339,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   const [selectedAssetEdgeId, setSelectedAssetEdgeId] = useState<string>();
   const [canvasContextMenu, setCanvasContextMenu] = useState<CanvasContextMenuState>();
   const [expandedTextId, setExpandedTextId] = useState<string>();
-  // Marquee-selected nodes keep their panels closed until clicked: a marquee arranges nodes, a click edits one.
+  // A marquee arranges nodes; explicitly activating a node opens its panel.
   const [marqueeActive, setMarqueeActive] = useState(false);
   const [marqueeSelectedIds, setMarqueeSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
   const [copiedSelection, setCopiedSelection] = useState(lastCanvasClipboard);
@@ -413,7 +413,9 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   const historyTimer = useRef<number | undefined>(undefined);
   const historyGestureBase = useRef<AssetCanvasDocument | undefined>(undefined);
   const [, setHistoryRevision] = useState(0);
-  const selection = JSON.stringify(nodes.filter((node) => node.selected).map((node) => toAssetCanvasNode(node, model3DModels)));
+  const selectedNodes = nodes.filter((node) => node.selected);
+  const selectedNodeIdsJson = JSON.stringify(selectedNodes.map((node) => node.id));
+  const selection = JSON.stringify(selectedNodes.map((node) => toAssetCanvasNode(node, model3DModels)));
   useEffect(() => { onSelectionChange?.(JSON.parse(selection) as AssetCanvasNode[]); }, [selection, onSelectionChange]);
 
   useEffect(() => {
@@ -742,9 +744,13 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
 
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
   useEffect(() => {
-    const selected = new Set(nodes.filter((node) => node.selected).map((node) => node.id));
-    setMarqueeSelectedIds((current) => [...current].every((id) => selected.has(id)) ? current : new Set([...current].filter((id) => selected.has(id))));
-  }, [nodes]);
+    const selected = new Set<string>(JSON.parse(selectedNodeIdsJson));
+    setMarqueeSelectedIds((current) => {
+      if (!current.size) return current;
+      const next = new Set([...current].filter((id) => selected.has(id)));
+      return next.size === current.size ? current : next;
+    });
+  }, [selectedNodeIdsJson]);
   const imageModelsRef = useRef(imageModels); imageModelsRef.current = imageModels;
   const videoModelsRef = useRef(videoModels); videoModelsRef.current = videoModels;
   function reconcileCanvas(submitted: AssetCanvasDocument, saved: AssetCanvasDocument) {
@@ -1110,6 +1116,17 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
     setNodes((current) => current.map((node) => node.selected ? { ...node, selected: false } : node));
   }
 
+  function activateNode(nodeId: string): void {
+    setCanvasContextMenu(undefined);
+    setSelectedAssetEdgeId(undefined);
+    setMarqueeSelectedIds((current) => {
+      if (!current.has(nodeId)) return current;
+      const next = new Set(current);
+      next.delete(nodeId);
+      return next;
+    });
+  }
+
   async function generateTextNode(node: AssetCanvasFlowNode, model: AgentModelRef, reasoningLevel: AgentReasoningLevel): Promise<void> {
     if (node.type !== "text" || generatingTextNodeId) return;
     const instruction = node.data.instruction?.trim();
@@ -1455,11 +1472,16 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
         <button type="button" className="design-expanded-close" title="Back to canvas" aria-label="Back to canvas" onClick={() => setExpandedTextId(undefined)}><X size={16} /></button>
       </div> : null}
       <div className="interactive-story-body">
-        <div ref={canvasElement} tabIndex={0} inert={resolving || undefined} aria-busy={resolving || undefined} className={`interactive-story-canvas${fileDropActive ? " is-file-drop-active" : ""}`} onPointerMoveCapture={(event) => { pointer.current = { x: event.clientX, y: event.clientY }; }}
+        <div ref={canvasElement} tabIndex={0} inert={resolving || undefined} aria-busy={resolving || undefined} className={`interactive-story-canvas${selectedNodes.length === 1 ? " has-single-selection" : ""}${fileDropActive ? " is-file-drop-active" : ""}`} onPointerMoveCapture={(event) => { pointer.current = { x: event.clientX, y: event.clientY }; }}
           onPointerDownCapture={(event) => { if (!isTextEntry(event.target) && !eventWithin(event, "button, a, .nokey")) event.currentTarget.focus({ preventScroll: true }); }}
           onCopy={copySelection} onCut={(event) => copySelection(event, true)} onPaste={pasteFromClipboard}
           onKeyDown={(event) => {
             if (phase !== "ready" || isTextEntry(event.target) || eventWithin(event, ".nokey")) return;
+            // React Flow's keyboard activation does not emit onNodeClick.
+            if ((event.key === "Enter" || event.key === " ") && event.target instanceof HTMLElement && event.target.matches(".react-flow__node")) {
+              const nodeId = event.target.dataset.id;
+              if (nodeId) activateNode(nodeId);
+            }
             pasteNativeFiles(event, (files) => { void importCanvasFiles(files, transferPosition()); }, (cause) => setTransferError(errorMessage(cause)));
           }}
           onDragEnter={(event) => { if (!hasTransferredFiles(event.dataTransfer)) return; event.preventDefault(); dragDepth.current++; setFileDropActive(true); }}
@@ -1507,16 +1529,14 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
                 setMarqueeSelectedIds(new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id)));
               }}
               onNodeClick={(event, node) => {
-                setCanvasContextMenu(undefined);
-                setMarqueeSelectedIds((current) => current.has(node.id) ? new Set([...current].filter((id) => id !== node.id)) : current);
-                setSelectedAssetEdgeId(undefined);
+                activateNode(node.id);
                 if (eventWithin(event, ".story-media-view-button")) openViewer(node);
               }}
               // Only the preview opens the viewer; the prompt, chips, and video controls below keep their own double-click.
               onNodeDoubleClick={(event, node) => { if (eventWithin(event, ".story-media-stage")) openViewer(node); }}
               onPaneClick={() => { setCanvasContextMenu(undefined); clearSelection(); }}
               onNodeContextMenu={(_event, node) => {
-                setSelectedAssetEdgeId(undefined);
+                activateNode(node.id);
                 setNodes((current) => current.map((candidate) => ({ ...candidate, selected: candidate.id === node.id })));
               }}
               onNodesDelete={(deleted) => {
