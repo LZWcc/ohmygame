@@ -1,9 +1,15 @@
 # Agent request errors
 
-Model request failures carry a short, actionable explanation and expandable
-diagnostics in the chat timeline. Authentication, account limits, request
-compatibility, provider server errors, DNS, TLS, timeouts and interrupted responses
-have distinct presentations. Unknown failures remain explicitly unclassified.
+Model request failures appear as a single collapsed row in the chat timeline.
+Expand the row to see actionable guidance, full diagnostics and a footer copy
+icon. Copy success briefly shows a checkmark before the icon resets.
+Unclassified failures include an ellipsized provider response in the summary.
+Only the current reconnect attempt uses the activity shimmer; later model or
+tool activity stops it, and successful retries disappear.
+
+Authentication, account limits, request compatibility, provider server errors,
+DNS, TLS, timeouts and interrupted responses have distinct presentations.
+Unknown failures remain explicitly unclassified.
 
 The details can be copied and include the provider, model, endpoint, HTTP status,
 provider request ID, available underlying error codes and causes, and the number

@@ -9855,7 +9855,30 @@ button {
 }
 
 .connection-activity {
-  grid-template-columns: 14px minmax(0, 1fr);
+  width: fit-content;
+  max-width: 100%;
+  grid-template-columns: 14px minmax(0, auto) 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.connection-activity::-webkit-details-marker {
+  display: none;
+}
+
+.connection-activity:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+.connection-activity:hover .tool-label,
+.connection-activity:focus-visible .tool-label {
+  color: var(--text);
+}
+
+.connection-activity-details[open] > .connection-activity .tool-detail-chevron {
+  transform: rotate(90deg);
 }
 
 .connection-activity-failed .connection-activity > svg:first-child {
@@ -9875,33 +9898,19 @@ button {
 }
 
 .connection-activity-guidance {
-  margin: 3px 0 4px 21px;
+  margin: 0 0 4px;
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .connection-activity-diagnostics {
-  margin-left: 21px;
-}
-
-.connection-activity-diagnostics > summary {
+  min-width: 0;
+  margin: 2px 0 8px 21px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
   display: flex;
-  align-items: center;
-  gap: 4px;
-  width: fit-content;
-  cursor: pointer;
-  list-style: none;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.connection-activity-diagnostics > summary::-webkit-details-marker {
-  display: none;
-}
-
-.connection-activity-diagnostics[open] .tool-detail-chevron {
-  transform: rotate(90deg);
+  flex-direction: column;
 }
 
 .connection-activity-error dt {
@@ -9914,15 +9923,22 @@ button {
 }
 
 .connection-activity-copy {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 0;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: 0;
+  border-radius: 4px;
   background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
+  color: var(--text-faint);
   cursor: pointer;
+  align-self: flex-start;
+}
+
+.connection-activity-copy:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .tool-activity {
@@ -10005,7 +10021,7 @@ button {
   transition: transform 120ms ease;
 }
 
-:is(.tool-activity-details, .connection-activity-diagnostics, .image-read-details, .compaction-details) .tool-detail-chevron {
+:is(.tool-activity-details, .image-read-details, .compaction-details) .tool-detail-chevron {
   opacity: 0;
   transition:
     color 120ms ease,
@@ -10013,8 +10029,8 @@ button {
     transform 120ms ease;
 }
 
-:is(.tool-activity-details, .connection-activity-diagnostics, .image-read-details, .compaction-details) > summary:hover .tool-detail-chevron,
-:is(.tool-activity-details, .connection-activity-diagnostics, .image-read-details, .compaction-details) > summary:focus-visible .tool-detail-chevron {
+:is(.tool-activity-details, .image-read-details, .compaction-details) > summary:hover .tool-detail-chevron,
+:is(.tool-activity-details, .image-read-details, .compaction-details) > summary:focus-visible .tool-detail-chevron {
   opacity: 1;
 }
 
