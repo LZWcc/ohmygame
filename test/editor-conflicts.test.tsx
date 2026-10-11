@@ -9,7 +9,7 @@ import type { EditorCanvas } from "../src/renderer/editor-canvas.js";
 import type { ProjectState } from "../src/shared/contracts.js";
 import { createAssetCanvasDocument } from "../src/shared/asset-canvas.js";
 import { MODEL_3D_MODELS } from "../src/shared/generation-config.js";
-import { MODEL3D_CONNECTION_ID } from "../src/shared/model3d-operations.js";
+import { MODEL3D_CONNECTION_ID, tripoActions } from "../src/shared/model3d-operations.js";
 import type { CanvasBoardDetail } from "../src/shared/canvas-workspace.js";
 import type {
   NodeCodebaseDetail,
@@ -24,6 +24,7 @@ const captured = { props: undefined as CanvasProps | undefined };
 const api = {
   model3DOperations: vi.fn(),
   animationActions: vi.fn(),
+  balance: vi.fn(),
   getBoard: vi.fn<() => Promise<CanvasBoardDetail>>(),
   saveBoard:
     vi.fn<
@@ -65,7 +66,7 @@ vi.doMock(path.resolve("src/renderer/api.ts"), async (original) => ({
   listModel3DCatalog: async () => ({ models: [], providers: [] }),
   listModel3DOperations: api.model3DOperations,
   listModel3DAnimations: api.animationActions,
-  model3DBalance: async () => ({ balance: 123 }),
+  model3DBalance: api.balance,
   listPlayablePresets: async () => ({ presets: [] }),
   listPlayableThumbnails: async () => ({}),
   getPlayableValidation: async () => ({ issues: [] }),
@@ -110,6 +111,7 @@ beforeEach(() => {
   captured.props = undefined;
   api.model3DOperations.mockResolvedValue([]);
   api.animationActions.mockResolvedValue([{ id: 0, name: "Idle", category: "Daily", subCategory: "Idle" }]);
+  api.balance.mockResolvedValue({ balance: 123 });
   const canvas = createAssetCanvasDocument();
   canvas.nodes = [
     {
@@ -169,6 +171,7 @@ it("loads moves only when a picker opens and retries errors using legacy native 
   await act(async () => captured.props!.onNodesChange!(["first", "second"].map((id) => ({ id, type: "select", selected: true }))));
   expect(api.animationActions).not.toHaveBeenCalled();
   expect(container.querySelectorAll('[aria-label="Animation provider: Meshy"]')).toHaveLength(2);
+  expect(api.balance).not.toHaveBeenCalled();
   const moves = [...container.querySelectorAll("button")].find((button) => button.textContent === "1 move")!;
   await act(async () => moves.click());
   expect(api.animationActions).toHaveBeenCalledTimes(1);
@@ -181,6 +184,41 @@ it("loads moves only when a picker opens and retries errors using legacy native 
   expect(dialog.textContent).toContain("Idle");
   await act(async () => (dialog.querySelector('[aria-label="Close move picker"]') as HTMLButtonElement).click());
   expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("shows Tripo's real preset names without placeholder preview cards and preserves selection order", async () => {
+  const tripo = MODEL_3D_MODELS.find((model) => model.provider === "tripo")!;
+  const options = { rigModel: "v2.5-20260210" as const, rigType: "biped" as const };
+  api.model3DOperations.mockResolvedValue([{ ...tripo, id: MODEL3D_CONNECTION_ID, name: "Tripo", operations: ["animate"] }]);
+  api.animationActions.mockResolvedValue(tripoActions(options.rigModel, options.rigType));
+  boardDisk.board.nodes = [{ id: "tripo", type: "animate-3d", title: "Original", position: { x: 0, y: 0 },
+    data: { model: { provider: "tripo", id: MODEL3D_CONNECTION_ID }, actionIds: [], heightMeters: 1.7, options } }];
+  await openCanvas("asset-canvas");
+  await act(async () => captured.props!.onNodesChange!([{ id: "tripo", type: "select", selected: true }]));
+  const moves = [...container.querySelectorAll("button")].find((button) => button.textContent === "0 moves")!;
+  await act(async () => moves.click());
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(api.animationActions).toHaveBeenCalledWith({ provider: "tripo", id: MODEL3D_CONNECTION_ID }, options);
+  expect(dialog.textContent).toContain("without visual previews");
+  expect(dialog.querySelectorAll(".story-animation-picker-preview")).toHaveLength(0);
+  const move = (name: string) => [...dialog.querySelectorAll<HTMLButtonElement>(".story-animation-picker-grid > button")].find((button) => button.textContent === name)!;
+  await act(async () => move("Walk").click());
+  await act(async () => move("Idle").click());
+  expect([...dialog.querySelectorAll(".story-animation-picker-selected button")].map((button) => button.textContent)).toEqual(["Walk", "Idle"]);
+  expect(captured.props!.nodes[0]!.data.actionIds).toEqual(["preset:walk", "preset:idle"]);
+  expect(api.balance).not.toHaveBeenCalled();
+});
+
+it("keeps Meshy's supplied visual previews in the move picker", async () => {
+  api.model3DOperations.mockResolvedValue([{ ...MODEL_3D_MODELS[0]!, id: MODEL3D_CONNECTION_ID, name: "Meshy", operations: ["animate"] }]);
+  api.animationActions.mockResolvedValue([{ id: 0, name: "Idle", category: "Daily", subCategory: "Idle", previewUrl: "https://cdn.test/idle.gif" }]);
+  boardDisk.board.nodes = [{ id: "meshy", type: "animate-3d", title: "Original", position: { x: 0, y: 0 }, data: { actionIds: [], heightMeters: 1.7 } }];
+  await openCanvas("asset-canvas");
+  await act(async () => captured.props!.onNodesChange!([{ id: "meshy", type: "select", selected: true }]));
+  await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "0 moves")!.click());
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector(".story-animation-picker-preview img")?.getAttribute("src")).toBe("https://cdn.test/idle.gif");
+  expect(dialog.textContent).not.toContain("without visual previews");
 });
 async function openCanvas(type: "web-game" | "asset-canvas") {
   const storage = createCanvasBoardStorage({

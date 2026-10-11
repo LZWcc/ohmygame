@@ -43,6 +43,11 @@ Native processing and animation connections remain available when generation mod
 are hidden. Each native provider appears once in these selectors, using the stable
 `connection` ID; older geometry-version references still resolve to that connection.
 Generation selectors keep their geometry versions. Moves load when the picker opens.
+Meshy's supplied previews appear as cards; providers without preview URLs, including
+Tripo's documented presets, use a searchable name list with ordered selection.
+Own-key balances live in provider settings, using one balance per compatible
+protocol/base URL for custom connections. Hyper3D's free daily quota and per-generation
+cost remain in the canvas because they affect the selected model's availability.
 A custom 3D model stays generation-only until **Compatible 3D operations**
 explicitly enables additional endpoints. Compatible calls honor the model's base
 URL override, auth mode and runtime headers. A custom Meshy URL ending in `/v1`

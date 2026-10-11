@@ -87,7 +87,7 @@ import {
   type VideoResolution,
 } from "../shared/contracts.js";
 import { combineAssetCanvasPrompt, createAssetGenerationNode, isTextGenerationReferenceNode, preferredImageOption, validateAssetCanvasDocument } from "../shared/asset-canvas.js";
-import { createLibraryImage, getLibraryAsset, getWorkspaceAsset, getProjectCover, getProjectCoverState, listImageModelCatalog, listModel3DAnimations, listModel3DOperations, model3DBalance, listModel3DCatalog, listVideoModelCatalog, MODELS_CHANGED_EVENT, setProjectCover, uploadLibraryAsset } from "./api.js";
+import { createLibraryImage, getLibraryAsset, getWorkspaceAsset, getProjectCover, getProjectCoverState, listImageModelCatalog, listModel3DAnimations, listModel3DOperations, listModel3DCatalog, listVideoModelCatalog, MODELS_CHANGED_EVENT, setProjectCover, uploadLibraryAsset } from "./api.js";
 import { useAuth } from "./auth.js";
 import { accountCloudState, canAffordCloudModel, CloudQuotaStatus } from "./cloud-quota.js";
 import { downloadAssetBlob, loadLibraryAssets, type LibraryAsset } from "./library-assets.js";
@@ -1902,7 +1902,6 @@ function Model3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "d
         {operation === "retexture" && selectedModel?.protocol === "tripo" ? <CanvasChipSelect label="Texture quality" value={data.model3DOptions?.textureQuality ?? "standard"} options={["fast", "standard", "detailed", "extreme"].map((value) => ({ value, label: titleCase(value) }))} disabled={runtime?.busy} onChange={(textureQuality) => runtime?.onChange({ ...data, model3DOptions: { ...data.model3DOptions, textureQuality: textureQuality as Model3DOptions["textureQuality"] } })} /> : null}
         <GenerateMediaButton kind="model" assetId={data.assetId} runtime={runtime} disabled={!hasInput || !selectedModel || Boolean(cloud && !canAffordCloudModel(cloud, selectedModel?.estimatedCredits))} />
       </div>
-      {selectedModel && !cloud ? <Model3DBalanceStatus model={selectedModel} /> : null}
       {selectedModel?.protocol === "hyper3d" && operation === "retexture" ? <small>Requires one reference image and a source GLB.</small> : null}
       {cloud ? <CloudQuotaStatus cloud={cloud} estimatedCredits={selectedModel?.estimatedCredits} onSignIn={auth.openSignIn} /> : operation === "image" && selectedModel?.estimatedCredits !== undefined ? <div className="canvas-model-generation-label">API key · {selectedModel.estimatedCredits} credits / generation</div> : null}
     </MediaNodeShell>
@@ -1967,7 +1966,6 @@ function Animate3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, 
         /> : null}
         <GenerateMediaButton kind="animation" assetId={data.assetId} runtime={runtime} disabled={!selectedModel || !data.images?.length || actionIds.length === 0} />
       </div>
-      {selectedModel ? <Model3DBalanceStatus model={selectedModel} /> : null}
       {pickerOpen && runtime ? (
         <AnimationActionPicker
           model={selectedModel}
@@ -1993,6 +1991,7 @@ function AnimationActionPicker({ model, options, selectedIds, onChange, onClose 
   const key = JSON.stringify([model?.provider, model?.id, options?.rigModel, options?.rigType]);
   const actions = state.key === key ? state.actions : [];
   const status = state.key === key ? state.status : "loading";
+  const hasPreviews = actions.some((action) => action.previewUrl);
   useEffect(() => {
     let active = true;
     if (!model) return;
@@ -2033,13 +2032,16 @@ function AnimationActionPicker({ model, options, selectedIds, onChange, onClose 
       <section className="story-video-picker story-animation-picker" ref={dialog} role="dialog" aria-modal="true" aria-labelledby="story-animation-picker-title" tabIndex={-1}>
         <header><h2 id="story-animation-picker-title">Choose moves</h2><button type="button" aria-label="Close move picker" onClick={onClose}><X size={16} /></button></header>
         <label><Search size={14} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search moves" /></label>
-        <div className="story-animation-picker-categories" role="group" aria-label="Move categories">
-          <button className="canvas-chip is-toggle" type="button" aria-pressed={!category} onClick={() => setCategory(undefined)}>All</button>
-          {categories.map((name) => (
-            <button className="canvas-chip is-toggle" type="button" key={name} aria-pressed={category === name} onClick={() => setCategory(name)}>{splitCamelCase(name)}</button>
-          ))}
+        <div className="story-animation-picker-filters">
+          {status === "ready" && actions.length > 0 && !hasPreviews ? <p className="story-animation-picker-note">{model?.providerName ?? "This provider"} provides preset moves without visual previews.</p> : null}
+          {categories.length > 1 || category ? <div className="story-animation-picker-categories" role="group" aria-label="Move categories">
+            <button className="canvas-chip is-toggle" type="button" aria-pressed={!category} onClick={() => setCategory(undefined)}>All</button>
+            {categories.map((name) => (
+              <button className="canvas-chip is-toggle" type="button" key={name} aria-pressed={category === name} onClick={() => setCategory(name)}>{splitCamelCase(name)}</button>
+            ))}
+          </div> : null}
         </div>
-        <div className="story-animation-picker-grid">
+        <div className={`story-animation-picker-grid${!hasPreviews ? " is-list" : ""}`}>
           {!model ? <p>Set up an animation provider in <button type="button" onClick={MANAGE_PROVIDERS.onSelect}>Manage providers</button> to browse moves.</p>
             : status === "loading" ? <p><LoaderCircle className="spin" size={16} /> Loading moves...</p>
             : status === "error" ? <p>Could not load moves. <button type="button" onClick={() => setReload((value) => value + 1)}>Try again</button></p>
@@ -2047,12 +2049,13 @@ function AnimationActionPicker({ model, options, selectedIds, onChange, onClose 
             : visible.map((action) => {
               const chosen = selectedIds.includes(action.id);
               return (
-                <button type="button" key={action.id} aria-pressed={chosen} disabled={!chosen && full} onClick={() => toggle(action.id)} title={`${action.name} · ${splitCamelCase(action.subCategory)}`}>
-                  <span className="story-animation-picker-preview">
-                    {action.previewUrl ? <img src={action.previewUrl} alt="" loading="lazy" /> : <WandSparkles size={20} />}
+                <button type="button" key={action.id} className={!action.previewUrl ? "story-animation-picker-text-move" : undefined} aria-pressed={chosen} disabled={!chosen && full} onClick={() => toggle(action.id)} title={`${action.name} · ${splitCamelCase(action.subCategory)}`}>
+                  {action.previewUrl ? <span className="story-animation-picker-preview">
+                    <img src={action.previewUrl} alt="" loading="lazy" />
                     {chosen ? <span className="story-animation-picker-check"><Check size={12} /></span> : null}
-                  </span>
+                  </span> : null}
                   <strong>{action.name}</strong>
+                  {!action.previewUrl ? <span className="story-animation-picker-selection" aria-hidden="true">{chosen ? <Check size={12} /> : null}</span> : null}
                 </button>
               );
             })}
@@ -3327,15 +3330,4 @@ function bitmapToWebP(image: ImageBitmap): Promise<Blob | undefined> {
 
 function canvasToWebP(canvas: HTMLCanvasElement): Promise<Blob | undefined> {
   return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob ?? undefined), "image/webp", 0.8));
-}
-
-function Model3DBalanceStatus({ model }: { model: ModelRef }) {
-  const [state, setState] = useState<{ key: string; balance?: number; frozen?: number; error?: boolean }>();
-  const [reload, setReload] = useState(0), key = modelRefKey(model);
-  useEffect(() => {
-    let active = true;
-    void model3DBalance(model).then((value) => { if (active) setState({ key, ...value }); }).catch(() => { if (active) setState({ key, error: true }); });
-    return () => { active = false; };
-  }, [key, reload, model]);
-  return <div className="canvas-model-generation-label">{state?.key !== key ? "Loading balance…" : state.error ? "Balance unavailable" : `API balance: ${state.balance}${state.frozen ? ` · ${state.frozen} frozen` : ""}`} <button type="button" onClick={() => setReload((value) => value + 1)}>Refresh</button></div>;
 }
