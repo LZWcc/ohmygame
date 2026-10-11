@@ -15,6 +15,24 @@ afterEach(async () => {
 });
 
 describe("preview content isolation", () => {
+  it("moves a live document between editor and player without replacing its client or losing diagnostics", async () => {
+    const server = createServer((_incoming, outgoing) => outgoing.writeHead(200, { "content-type": "text/html" }).end("<head></head>"));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    cleanups.push(() => new Promise<void>((resolve) => server.close(() => resolve())));
+    const diagnostic = vi.fn(), navigation = vi.fn();
+    const proxy = await createPreviewProxy(`http://127.0.0.1:${(server.address() as AddressInfo).port}`, diagnostic, { onNavigation: navigation });
+    cleanups.push(() => proxy.close());
+    const html = await (await fetch(`${proxy.url}/scene?__ohmygame_client=shared&__ohmygame_view=editor`)).text();
+    const bridge = new URL(html.match(/src="([^"]+bridge[^"]+)"/)![1], proxy.url).href;
+    const report = (value: unknown) => fetch(bridge, { method: "POST", headers: { origin: proxy.url }, body: JSON.stringify(value) });
+    await report({ type: "diagnostic", path: "/scene?level=2#boss", diagnostic: { kind: "runtime", message: "Game error" } });
+    await report({ type: "source", source: "player", path: "/scene?level=2#boss" });
+    expect(navigation).toHaveBeenLastCalledWith("shared", "player", "/scene?level=2#boss");
+    expect(diagnostic.mock.calls.at(-1)?.[1]).toEqual([expect.objectContaining({ client: "shared", source: "player", message: "Game error" })]);
+    expect((await report({ type: "source", source: "playtest" })).status).toBe(400);
+    await report({ type: "source", source: "editor", path: "/scene?level=2#boss" });
+    expect(diagnostic.mock.calls.at(-1)?.[1]).toEqual([expect.objectContaining({ client: "shared", source: "editor", message: "Game error" })]);
+  });
   it("preserves same-origin framework requests and redirects without rewriting foreign origins", async () => {
     let target = "";
     const server = createServer((incoming, outgoing) => {

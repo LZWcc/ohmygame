@@ -96,15 +96,22 @@ is used and saved; browser storage at the previous origin cannot migrate
 automatically. Duplicated projects receive a separate origin.
 
 Page reload and server restart are separate controls. Internal navigation updates
-the toolbar without reloading the iframe. Restart and switching between Preview
-and Play retain the latest route, including its query and hash. Games must save
-progress themselves in browser storage; moving between windows does not transfer
-in-memory state. Static file changes reload active pages through a local event
+the toolbar without reloading the game. The desktop editor owns one human game
+WebContentsView per project. Play moves that view into a separate native window;
+closing Play returns it to Preview. Both directions preserve the same document,
+current route, in-memory state, localStorage and IndexedDB. Refresh explicitly
+recreates the game document at its current route. A minimal host page, with no
+editor preload or daemon credentials, keeps the editor's top-level site so existing
+Preview saves remain available. Older standalone Play saves stay in their separate
+storage context and are not merged. Browser builds continue to use an iframe and
+separate popup, which reload the game on switching. Static file changes reload
+active pages through a local event
 stream, while development servers retain their own HMR protocol.
 
-Each editor, human player, AI test and external page has its own client/document
-identity. The editor shows its own diagnostic, or the human player's diagnostic
-while Play owns the game. Errors from other windows remain available in the log
+Desktop Preview and human Play share a client/document identity; the diagnostic
+source follows the view's current window without reloading it. AI tests and external
+pages have their own identities and storage contexts. The editor shows the active
+human game's diagnostic. Errors from other windows remain available in the log
 panel. Navigation, HMR success and close clear only that client's errors; late
 reports from superseded documents are ignored. Diagnostic and document maps are
 bounded, and each active document has at most one refresh stream.
