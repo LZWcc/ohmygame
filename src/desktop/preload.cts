@@ -4,6 +4,7 @@ import type { ProjectFileOpenMode } from "../shared/contracts.js";
 import type { PlaytestWatchState } from "../shared/playtest.js";
 import type { DesktopClipboardFile } from "../shared/file-transfer.js";
 import type { WebGamePlayerRequest, WebGamePlayerState } from "../shared/web-game-player.js";
+import type { DesktopRuntimeState } from "../shared/desktop-runtime.js";
 
 function argument(name: string): string {
   const prefix = `--${name}=`;
@@ -18,6 +19,15 @@ if (process.isMainFrame) {
     runtime: Object.freeze({
       daemonUrl: argument("ohmygame-daemon-url"),
       token: argument("ohmygame-daemon-token"),
+    }),
+    runtimeService: Object.freeze({
+      state: () => ipcRenderer.invoke("ohmygame:runtime-state") as Promise<DesktopRuntimeState>,
+      restart: () => ipcRenderer.invoke("ohmygame:restart-runtime") as Promise<DesktopRuntimeState>,
+      onState: (listener: (state: DesktopRuntimeState) => void) => {
+        const handler = (_event: Electron.IpcRendererEvent, state: DesktopRuntimeState) => listener(state);
+        ipcRenderer.on("ohmygame:runtime-state", handler);
+        return () => ipcRenderer.removeListener("ohmygame:runtime-state", handler);
+      },
     }),
     setAppearance: (appearance: "system" | "light" | "dark") =>
       ipcRenderer.invoke("ohmygame:set-appearance", appearance) as Promise<void>,
@@ -63,6 +73,7 @@ if (process.isMainFrame) {
     webGamePlayer: Object.freeze({
       open: (projectId: string, request: WebGamePlayerRequest) => ipcRenderer.invoke("ohmygame:open-web-game-player", projectId, request) as Promise<void>,
       state: (projectId: string) => ipcRenderer.invoke("ohmygame:web-game-player-state", projectId) as Promise<WebGamePlayerState>,
+      close: (projectId: string) => ipcRenderer.invoke("ohmygame:close-web-game-player", projectId) as Promise<void>,
       refresh: (projectId: string, reload = false) => ipcRenderer.invoke("ohmygame:refresh-web-game-player", projectId, reload) as Promise<void>,
       onState: (listener: (state: WebGamePlayerState) => void) => {
         const callback = (_event: Electron.IpcRendererEvent, state: WebGamePlayerState) => listener(state);

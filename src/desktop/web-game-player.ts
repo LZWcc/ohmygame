@@ -1,3 +1,4 @@
+import { previewPageUrl } from "../shared/preview-page.js";
 import { BrowserWindow, shell } from "electron";
 import type { WebGamePlayerRequest, WebGamePlayerState } from "../shared/web-game-player.js";
 import { webGamePlayerUrl } from "../shared/web-game-player.js";
@@ -48,9 +49,17 @@ export class WebGamePlayerWindows {
     const current = new URL(window.webContents.getURL());
     const base = new URL(target.url);
     if (!reload && current.origin === base.origin) return;
-    const url = webGamePlayerUrl(base.href, `${current.pathname}${current.search}${current.hash}`);
+    const url = previewPageUrl(webGamePlayerUrl(base.href, `${current.pathname}${current.search}${current.hash}`), "player", current.searchParams.get("__ohmygame_client") ?? undefined);
     player.origin = new URL(url).origin;
     await window.loadURL(url);
+  }
+
+  closeProject(projectId: string): void {
+    const player = this.#players.get(projectId);
+    if (!player) return;
+    this.#players.delete(projectId);
+    player.window?.destroy();
+    this.onState(this.state(projectId));
   }
 
   close(): void {
@@ -65,7 +74,7 @@ export class WebGamePlayerWindows {
     try {
       const target = await resolveTarget();
       if (this.#players.get(projectId) !== player) throw new Error("Game launch was cancelled.");
-      const url = webGamePlayerUrl(target.url, request.path);
+      const url = previewPageUrl(webGamePlayerUrl(target.url, request.path), "player");
       player.origin = new URL(url).origin;
       const window = new BrowserWindow({
         width: request.viewport.width,

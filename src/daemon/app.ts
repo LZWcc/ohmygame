@@ -1,3 +1,6 @@
+import { inspectPreviewConfiguration } from "./preview-configuration.js";
+import { validatePreviewSettings } from "../shared/preview-settings.js";
+import { previewPageUrl } from "../shared/preview-page.js";
 import { PluginSetupManager, registerPluginSetupRoutes } from "./plugin-setup.js";
 import { PluginCapabilities } from "./plugin-capabilities.js";
 import { registerPluginCapabilityRoutes } from "./plugin-capability-routes.js";
@@ -36,7 +39,7 @@ import { promptContextBlock } from "./prompt-context.js";
 import { RemotePublisher, RemotePublishError } from "./publish/client.js";
 import { LocalPublisher } from "./publish/local.js";
 import { LOCAL_DEBUG_ACCESS_TOKEN } from "../shared/local-debug.js";
-import { PreviewManager } from "./preview.js";
+import { PreviewManager, PreviewCancelledError } from "./preview.js";
 import { ProjectAssetError, ProjectManager, ProjectLibraryReferenceError, ProjectWorkspaceError } from "./projects.js";
 import { ExampleError, ExampleStore } from "./examples.js";
 import { ModelAuthError, ModelAuthManager } from "./model-auth.js";
@@ -185,6 +188,12 @@ const runSettingsSchema = {
       previewPath: { type: "string", maxLength: 1_000 },
       previewViewport: { enum: ["fit", "tablet", "mobile"] },
       webPreviewEnabled: { type: "boolean" },
+      previewAutoStart: { type: "boolean" },
+      previewMode: { enum: ["auto", "script", "static", "command"] },
+      previewCommand: { type: "string", maxLength: 2_000 },
+      previewArguments: { type: "array", maxItems: 20, items: { type: "string", maxLength: 500 } },
+      previewPort: { type: "integer", minimum: 1024, maximum: 65535 },
+      previewIdleMinutes: { type: "integer", minimum: 0, maximum: 60 },
     },
   },
 } as const;
@@ -712,7 +721,7 @@ export function createApp(options: AppOptions = {}) {
               runtime: "web",
               url: project.type === "interactive-story"
                 ? await playableDrafts.open(project)
-                : await previews.ensureStarted(project),
+                : previewPageUrl(await previews.ensureStarted(project, false), "playtest"),
             }),
           } : undefined,
           webSearch.enabled() ? (input, signal) => webSearch.search(conversation.summary.id, input, signal) : undefined,
@@ -733,8 +742,7 @@ export function createApp(options: AppOptions = {}) {
       await agentPlaytests.get(`${project.id}:${conversationId}`)?.cleanup();
     },
     onRunCompleted: (project) => {
-      if (!supportsWebPreview(project) || project.preview.status === "ready" || project.preview.status === "starting") return;
-      void previews.ensureStarted(project).catch(() => {});
+      void previews.automatic(project, true).catch(() => {});
     },
   });
   const invalidatePluginSessions = () => {
@@ -1350,11 +1358,14 @@ export function createApp(options: AppOptions = {}) {
 
   const syncRunSettings = async (before: ProjectState, project: ProjectState) => {
     if (webPreviewSettingsChanged(before, project)) {
-      await previews.stop(project);
+      const running = before.preview.status === "ready" || before.preview.status === "starting";
+      await previews.stop(project, "settings");
       await projects.refreshPreviewReadiness(project.id);
       // Preview capability and run settings affect both agent tools and its prompt.
       agents.invalidateProjectSessions(project.id);
+      if (running && supportsWebPreview(project) && project.preview.status !== "waiting") void previews.start(project, false, false).catch(() => {});
     }
+    void previews.automatic(project).catch(() => {});
     events.publish(project.id, "project.updated", { project: structuredClone(project) });
     return project;
   };
@@ -1429,7 +1440,7 @@ export function createApp(options: AppOptions = {}) {
     const project = projects.get(request.params.projectId);
     if (!project) return reply.code(404).send({ error: "Project not found" });
     if (agents.isProjectBusy(project.id)) return reply.code(409).send({ error: "Wait for the agent to finish before deleting this project" });
-    await previews.stop(project);
+    await previews.forget(project);
     agents.forgetProject(project.id);
     conversations.forget(project);
     for (const [key, driver] of agentPlaytests) {
@@ -2485,17 +2496,47 @@ export function createApp(options: AppOptions = {}) {
     },
   );
 
-  app.post<{ Params: { projectId: string }; Querystring: { reuse?: string } }>("/projects/:projectId/preview", async (request, reply) => {
+  app.post<{ Params: { projectId: string }; Body: ProjectRunSettings }>("/projects/:projectId/preview/inspect", { schema: runSettingsSchema }, async (request, reply) => {
+    const project = projects.get(request.params.projectId);
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    try { validatePreviewSettings(request.body); } catch (cause) { return reply.code(400).send({ error: (cause as Error).message }); }
+    return inspectPreviewConfiguration({ ...project, ...request.body, packageManager: request.body.packageManager });
+  });
+  app.delete<{ Params: { projectId: string } }>("/projects/:projectId/preview", async (request, reply) => {
+    const project = projects.get(request.params.projectId);
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    await previews.stop(project);
+    return { preview: project.preview };
+  });
+  app.put<{ Params: { projectId: string; leaseId: string }; Body: { automatic?: boolean; paused?: boolean } }>(
+    "/projects/:projectId/preview/leases/:leaseId",
+    { schema: { params: { type: "object", required: ["projectId", "leaseId"], properties: { projectId: { type: "string" }, leaseId: { type: "string", pattern: "^[a-zA-Z0-9-]{1,100}$" } } }, body: { type: "object", additionalProperties: false, properties: { automatic: { type: "boolean" }, paused: { type: "boolean" } } } } },
+    async (request, reply) => {
+      const project = projects.get(request.params.projectId);
+      if (!project) return reply.code(404).send({ error: "Project not found" });
+      previews.acquire(project, `editor:${request.params.leaseId}`, request.body.automatic, request.body.paused);
+      return { preview: project.preview };
+    },
+  );
+  app.delete<{ Params: { projectId: string; leaseId: string } }>("/projects/:projectId/preview/leases/:leaseId", async (request, reply) => {
+    const project = projects.get(request.params.projectId);
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    previews.release(project, `editor:${request.params.leaseId}`);
+    return reply.code(204).send();
+  });
+
+  app.post<{ Params: { projectId: string }; Querystring: { reuse?: string; reinstall?: string } }>("/projects/:projectId/preview", async (request, reply) => {
     const project = projects.get(request.params.projectId);
     if (!project) return reply.code(404).send({ error: "Project not found" });
     const reuse = request.query.reuse === "1";
     if (reuse && !isWebRuntimeProjectType(project.type)) return reply.code(409).send({ error: "Play requires a Web Game or General Game project." });
     try {
-      const url = await (reuse ? previews.ensureStarted(project) : previews.start(project));
+      const url = await (reuse ? previews.ensureStarted(project) : previews.start(project, request.query.reinstall === "1"));
       return { url, title: project.name };
     } catch (cause) {
+      if (cause instanceof PreviewCancelledError) return reply.code(409).send({ error: cause.message, code: "PREVIEW_CANCELLED" });
       if (cause instanceof ProjectWorkspaceError) return reply.code(409).send({ error: cause.message });
-      throw cause;
+      return reply.code(503).send({ error: cause instanceof Error ? cause.message : String(cause) });
     }
   });
 

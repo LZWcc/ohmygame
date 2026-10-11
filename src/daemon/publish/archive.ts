@@ -302,7 +302,7 @@ async function prepareSource(workspacePath: string, track: (child: ChildProcess)
     if (typeof build !== "string" || !build.trim()) {
       throw new PublishError("Projects with package.json need a non-empty scripts.build command before publishing");
     }
-    const packageManager = await resolvePackageManager(workspacePath, project?.packageManager);
+    const { manager: packageManager } = await resolvePackageManager(workspacePath, project?.packageManager);
     if (hasDependencies(packageJson)) {
       await ensureProjectDependencies(workspacePath, packageManager,
         (command, args) => run(command, args, workspacePath, track));

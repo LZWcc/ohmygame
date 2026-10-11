@@ -2,20 +2,18 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import path from "node:path";
 import type { PlaytestIpcMessage, PlaytestRequest, PlaytestResult } from "../shared/playtest.js";
+import { signalProcessTree } from "../daemon/process-lifecycle.js";
+import type { DaemonRuntime } from "../shared/desktop-runtime.js";
+export type { DaemonRuntime } from "../shared/desktop-runtime.js";
 
 const MAX_STARTUP_OUTPUT_CHARS = 8_000;
-
-export interface DaemonRuntime {
-  url: string;
-  token: string;
-}
 
 export interface ManagedDaemon {
   runtime: DaemonRuntime;
   stop(): Promise<void>;
 }
 
-interface StartDaemonOptions {
+export interface StartDaemonOptions {
   daemonEntry: string;
   dataDirectory: string;
   token: string;
@@ -32,6 +30,7 @@ interface StartDaemonOptions {
   healthTimeoutMs?: number;
   handlePlaytestRequest?: (request: PlaytestRequest, signal: AbortSignal) => Promise<PlaytestResult>;
   resolveSystemProxy?: () => Promise<string>;
+  onUnexpectedExit?: (error: Error) => void;
 }
 
 export async function startDaemon(options: StartDaemonOptions): Promise<ManagedDaemon> {
@@ -55,6 +54,7 @@ export async function startDaemon(options: StartDaemonOptions): Promise<ManagedD
       OHMYGAME_DATA_DIR: path.resolve(options.dataDirectory),
       OHMYGAME_DAEMON_TOKEN_STDIN: "1",
       OHMYGAME_ALLOWED_ORIGINS: options.allowedOrigins.join(","),
+      OHMYGAME_PROJECT_PROCESS_IPC: "1",
       ...(options.piAgentDirectory ? { PI_CODING_AGENT_DIR: path.resolve(options.piAgentDirectory) } : {}),
       ...(options.bundledPluginsDirectory ? { OHMYGAME_BUNDLED_PLUGINS_DIR: path.resolve(options.bundledPluginsDirectory) } : {}),
       ...(options.preinstalledPluginsDirectory ? { OHMYGAME_PREINSTALLED_PLUGINS_DIR: path.resolve(options.preinstalledPluginsDirectory) } : {}),
@@ -62,7 +62,14 @@ export async function startDaemon(options: StartDaemonOptions): Promise<ManagedD
       ...(options.playerDirectory ? { OHMYGAME_PLAYER_DIR: path.resolve(options.playerDirectory) } : {}),
       ...(options.handlePlaytestRequest ? { OHMYGAME_PLAYTEST_IPC: "1" } : {}),
     },
-    stdio: options.handlePlaytestRequest || options.resolveSystemProxy ? ["pipe", "pipe", "pipe", "ipc"] : ["pipe", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe", "ipc"],
+  });
+  const projectProcesses = new Set<number>();
+  child.on("message", (value: unknown) => {
+    const message = value as { channel?: unknown; action?: unknown; pid?: unknown } | null;
+    if (message?.channel !== "ohmygame:project-process" || typeof message.pid !== "number" || !Number.isSafeInteger(message.pid) || message.pid <= 0) return;
+    if (message.action === "started") projectProcesses.add(message.pid);
+    else if (message.action === "stopped") projectProcesses.delete(message.pid);
   });
   // The token goes over stdin: other processes of the same user can read the environment a process starts with.
   // Early child exits can close stdin; waitForHealth reports the startup failure and captured output.
@@ -82,6 +89,8 @@ export async function startDaemon(options: StartDaemonOptions): Promise<ManagedD
     ? bindPlaytestRequests(child, options.handlePlaytestRequest)
     : undefined;
   let processError: Error | undefined;
+  let ready = false;
+  let stopped = false;
   let startupOutput = "";
   const captureStartupOutput = (chunk: unknown) => {
     startupOutput = `${startupOutput}${String(chunk)}`.slice(-MAX_STARTUP_OUTPUT_CHARS);
@@ -99,15 +108,31 @@ export async function startDaemon(options: StartDaemonOptions): Promise<ManagedD
     processError = error;
     console.error("Managed daemon process error", error);
   });
+  const cleanup = async () => {
+    playtestRequests?.close();
+    const pids = [...projectProcesses];
+    projectProcesses.clear();
+    await Promise.all(pids.map((pid) => signalProcessTree(pid, true).catch((error) => console.warn("Could not stop project process", error))));
+  };
+  const closed = new Promise<void>((resolve) => child.once("close", (code, signal) => {
+    const unexpected = ready && !stopped;
+    void cleanup().finally(() => {
+      resolve();
+      if (unexpected) options.onUnexpectedExit?.(startupError(`The background service exited (${signal ?? code ?? "unknown"})`, startupOutput));
+    });
+  }));
 
   try {
     await waitForHealth(runtime, child, () => processError, () => startupOutput, options.healthTimeoutMs ?? 15_000);
+    if (child.exitCode !== null || child.signalCode !== null) throw startupError("Daemon exited during startup", startupOutput);
+    ready = true;
   } catch (error) {
+    stopped = true;
     await stopChild(child);
+    await cleanup();
     throw error;
   }
 
-  let stopped = false;
   return {
     runtime,
     async stop() {
@@ -115,6 +140,7 @@ export async function startDaemon(options: StartDaemonOptions): Promise<ManagedD
       stopped = true;
       playtestRequests?.close();
       await stopChild(child);
+      await closed;
     },
   };
 }
@@ -125,7 +151,7 @@ function bindPlaytestRequests(
 ): { close(): void } {
   const active = new Map<string, AbortController>();
   const send = (message: PlaytestIpcMessage) => {
-    if (child.connected) child.send?.(message);
+    if (child.connected) child.send?.(message, () => {});
   };
   const onMessage = (value: unknown) => {
     if (!value || typeof value !== "object") return;
@@ -180,8 +206,8 @@ async function waitForHealth(
   while (Date.now() < deadline) {
     const error = processError();
     if (error) throw error;
-    if (child.exitCode !== null) {
-      throw startupError(`Daemon exited before becoming ready (${child.exitCode})`, startupOutput());
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw startupError(`Daemon exited before becoming ready (${child.signalCode ?? child.exitCode})`, startupOutput());
     }
     try {
       const response = await fetch(`${runtime.url}/health`, {
@@ -206,14 +232,24 @@ function startupError(message: string, output: string): Error {
 }
 
 async function stopChild(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   child.kill("SIGTERM");
-  const forced = await Promise.race([exited.then(() => false), delay(5_000).then(() => true)]);
+  const forced = await exitWithin(exited, 5_000);
   if (forced && child.exitCode === null && child.signalCode === null) {
     child.kill("SIGKILL");
-    await exited;
+    if (await exitWithin(exited, 1_000)) throw new Error("The background service could not be stopped.");
   }
+}
+
+async function exitWithin(exited: Promise<void>, milliseconds: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      exited.then(() => false),
+      new Promise<true>((resolve) => { timer = setTimeout(() => resolve(true), milliseconds); }),
+    ]);
+  } finally { clearTimeout(timer); }
 }
 
 function delay(milliseconds: number): Promise<void> {

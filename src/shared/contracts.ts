@@ -1,3 +1,4 @@
+import type { ProjectPreviewSettings } from "./preview-settings.js";
 import type { PublishCommunityGame, PublishDeployment } from "./publish-v1.js";
 import type { WebSearchToolMetadata } from "./web-search.js";
 
@@ -308,7 +309,25 @@ export interface ProjectCoverState {
   mode: ProjectCoverMode;
 }
 
-export interface ProjectState {
+export interface PreviewRuntimeState {
+  status: PreviewStatus;
+  url?: string;
+  error?: string;
+  diagnostic?: import("./preview-diagnostics.js").PreviewDiagnostic;
+  diagnostics?: import("./preview-diagnostics.js").PreviewDiagnostic[];
+  phase?: "checking" | "installing" | "launching" | "connecting";
+  startedAt?: string;
+  logs?: string;
+  command?: string;
+  directory?: string;
+  manager?: ProjectPackageManager;
+  managerSource?: string;
+  revision?: number;
+  pages?: { client: string; source: import("./preview-page.js").PreviewPageSource; path: string }[];
+  stopReason?: "manual" | "idle" | "settings" | "recovery";
+}
+
+export interface ProjectState extends ProjectPreviewSettings {
   id: string;
   name: string;
   type: ProjectType;
@@ -333,11 +352,11 @@ export interface ProjectState {
   workspaceLocation?: "managed" | "external";
   /** False when a previously selected workspace is no longer available on disk. */
   workspaceAvailable?: boolean;
-  preview: { status: PreviewStatus; url?: string; error?: string };
+  preview: PreviewRuntimeState;
   publication?: PublicationState;
 }
 
-export interface ProjectRunSettings {
+export interface ProjectRunSettings extends ProjectPreviewSettings {
   startupDirectory: string;
   startupScript: string;
   packageManager?: ProjectPackageManager;
@@ -1031,10 +1050,7 @@ export interface RuntimeEventData {
   "conversation.model.changed": { item: Extract<ThreadItem, { type: "modelChange" }> };
   "project.renamed": { project: ProjectState };
   "project.updated": { project: ProjectState };
-  "preview.starting": Record<string, never>;
-  "preview.ready": { url: string };
-  "preview.error": { error: string };
-  "preview.stopped": Record<string, never>;
+  "preview.updated": { preview: PreviewRuntimeState };
   "agent.started": { prompt: string; mentions?: PluginMention[]; images?: PromptImage[]; attachments?: ConversationAttachment[]; contexts?: PromptContextLabel[]; revision?: "last-turn" };
   "plan.mode.changed": PlanSessionState;
   "item.started": { item: ThreadItem };
@@ -1060,10 +1076,7 @@ export const RUNTIME_EVENT_TYPES = [
   "conversation.model.changed",
   "project.renamed",
   "project.updated",
-  "preview.starting",
-  "preview.ready",
-  "preview.error",
-  "preview.stopped",
+  "preview.updated",
   "agent.started",
   "item.started",
   "item.updated",

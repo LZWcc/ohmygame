@@ -51,12 +51,12 @@ describe("Web Game project codebase", () => {
     const copy = await manager.duplicate(project.id);
     expect(await readFile(path.join(copy.workspacePath, "canvas/jobs.json"), "utf8")).toBe(history);
   });
-  it.each(["electron .", "tauri dev"])("keeps General Game preview off for a native dev script: %s", async (dev) => {
+  it.each(["electron .", "electron-forge start", "electron-vite dev", "tauri dev", "godot --editor", "NODE_ENV=dev electron .", "npx electron .", "npx --yes electron .", "cross-env NODE_ENV=dev electron .", "env NODE_OPTIONS='--trace-warnings --no-warnings' electron .", "./node_modules/.bin/electron .", "vite && electron .", "vite build", "bun format"])("does not treat a non-server dev script as a Web preview server: %s", async (dev) => {
     const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-native-project-"));
     const manager = new ProjectManager(directory);
     const project = await manager.create("Native", "general");
     await writeFile(path.join(project.workspacePath, "package.json"), JSON.stringify({ scripts: { dev } }));
-    expect(await manager.refreshPreviewReadiness(project.id)).toMatchObject({ webPreviewEnabled: false, preview: { status: "waiting" } });
+    expect(await manager.refreshPreviewReadiness(project.id)).toMatchObject({ webPreviewEnabled: true, preview: { status: "waiting" } });
     // Projects created before the switch existed must also remain opt-in.
     const metadataPath = path.join(directory, "projects", project.id, "project.json");
     const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
@@ -67,12 +67,24 @@ describe("Web Game project codebase", () => {
     expect(restored.get(project.id)).toMatchObject({ webPreviewEnabled: false, preview: { status: "waiting" } });
   });
 
-  it("persists explicit preview opt-in before output exists, through reload and duplication", async () => {
+  it.each(["vite --host 127.0.0.1", "vite --config godot/vite.config.ts", "vite --open /tauri/index.html", "vite --config build/vite.config.ts", "vite --define 'godot | tauri'", "NODE_ENV=dev pnpm exec vite"])("keeps Web servers runnable when arguments contain task or engine names: %s", async (dev) => {
+    const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-server-project-"));
+    try {
+      const manager = new ProjectManager(directory);
+      const project = await manager.create("Browser", "general");
+      await writeFile(path.join(project.workspacePath, "package.json"), JSON.stringify({ scripts: { dev } }));
+      expect(await manager.refreshPreviewReadiness(project.id)).toMatchObject({ preview: { status: "stopped" } });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("enables preview for new General projects and preserves an explicit opt-out through reload and duplication", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-preview-opt-in-"));
     const manager = new ProjectManager(directory);
     const project = await manager.create("Browser output", "general");
     const settings = { startupDirectory: ".", startupScript: "dev", previewPath: "/", previewViewport: "fit" as const, webPreviewEnabled: true };
-    expect(await manager.setRunSettings(project.id, settings)).toMatchObject({ webPreviewEnabled: true, preview: { status: "waiting" } });
+    expect(project).toMatchObject({ webPreviewEnabled: true, preview: { status: "waiting" } });
     await writeFile(path.join(project.workspacePath, "package.json"), JSON.stringify({ scripts: { dev: "vite" } }));
     expect(await manager.refreshPreviewReadiness(project.id)).toMatchObject({ preview: { status: "stopped" } });
     const restored = new ProjectManager(directory);
@@ -81,6 +93,9 @@ describe("Web Game project codebase", () => {
     expect(await restored.duplicate(project.id)).toMatchObject({ webPreviewEnabled: true, preview: { status: "stopped" } });
     await manager.setRunSettings(project.id, { ...settings, webPreviewEnabled: false });
     expect(await manager.duplicate(project.id)).toMatchObject({ webPreviewEnabled: false, preview: { status: "waiting" } });
+    const disabled = new ProjectManager(directory);
+    await disabled.load();
+    expect(disabled.get(project.id)).toMatchObject({ webPreviewEnabled: false, preview: { status: "waiting" } });
   });
 
   it("allows disabling preview when its configured directory has been removed", async () => {

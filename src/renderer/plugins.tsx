@@ -1,3 +1,4 @@
+import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { AddMcpPluginDialog, PluginAssistantDialog, PluginConfigurationPanel, PluginMcpPanel } from "./plugin-controls.js";
 import {
   Box,
@@ -40,10 +41,12 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
   onPluginChange: (pluginId?: string) => void;
   onTryPlugin: (plugin: PluginDetail, prompt: string, projectId?: string) => Promise<void>;
 }) {
+  const serviceGeneration = useReadyRuntimeGeneration();
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [detailResult, setDetailResult] = useState<{ pluginId: string; plugin?: PluginDetail; error?: string }>();
   const [detailRetry, setDetailRetry] = useState(0);
+  const detailRequest = useRef({ pluginId, retry: detailRetry });
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [catalogRetry, setCatalogRetry] = useState(0);
@@ -76,8 +79,12 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
     }
   }
 
-  useEffect(() => { void load(); }, [catalogRetry]);
+  useEffect(() => { void load(); }, [catalogRetry, serviceGeneration]);
   useEffect(() => {
+    const explicitReload = detailRequest.current.pluginId !== pluginId || detailRequest.current.retry !== detailRetry;
+    detailRequest.current = { pluginId, retry: detailRetry };
+    // A service refresh keeps an already loaded configuration and its unsaved fields.
+    if (!explicitReload && detailResult?.plugin && detailResult.pluginId === pluginId) return;
     setDetailResult(undefined);
     setError(undefined);
     if (!pluginId) return;
@@ -93,7 +100,7 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
       }
     })();
     return () => { disposed = true; };
-  }, [pluginId, detailRetry]);
+  }, [pluginId, detailRetry, serviceGeneration]);
 
   useEffect(() => {
     if (!addMenuOpen) return;

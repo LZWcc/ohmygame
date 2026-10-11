@@ -123,6 +123,10 @@ export function projectHash(projectId: string, view?: "design"): string {
   return `#/projects/${encodeURIComponent(projectId)}${view ? "/design" : ""}`;
 }
 
+export function createdProjectView(type: ProjectType | undefined): "design" | undefined {
+  return type === "general" ? "design" : undefined;
+}
+
 export function conversationHash(projectId: string, conversationId: string, view?: "design"): string {
   return `${projectHash(projectId)}/conversations/${encodeURIComponent(conversationId)}${view ? "/design" : ""}`;
 }

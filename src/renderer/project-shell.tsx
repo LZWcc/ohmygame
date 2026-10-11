@@ -23,6 +23,10 @@ import type { AgentModel, AgentModelRef, AgentReasoningLevel, ConversationCapabi
 import { findAgentModel, preferredAgentModel } from "../shared/agent-models.js";
 import { isWebRuntimeProjectType, supportsWebPreview } from "../shared/project-runtime.js";
 import {
+  ApiError,
+  acquirePreview,
+  releasePreview,
+  stopPreview,
   approvePlan,
   answerQuestionnaire,
   cancelPrompt,
@@ -64,13 +68,15 @@ import { readChatLayout, type ChatLayout } from "./chat-layout.js";
 import { forgetPendingPublish, rememberPendingPublish, takePendingPublish } from "./pending-publish.js";
 import type { PublishDetails } from "./publish-dialog.js";
 import { usePlaytestAskRequests } from "./playable-playtest.js";
+import { useRuntimeConnection } from "./runtime-connection.js";
+import { ErrorBoundary } from "./error-boundary.js";
 
 interface ProjectShellProps {
   projectId: string;
   conversationId?: string;
   view?: "design";
   onViewChange?: (view: "design" | "workspace", options?: { replace?: boolean }) => void;
-  initialPrompt?: { prompt: string; mentions: PluginMention[]; images: PromptImage[]; mode: PromptMode; attachments?: PromptAttachment[] };
+  initialPrompt?: { generation: number; prompt: string; mentions: PluginMention[]; images: PromptImage[]; mode: PromptMode; attachments?: PromptAttachment[] };
   initialDraft?: ComposerDraft;
   initialCanvasNodeId?: string;
   onInitialCanvasNodeHandled?: () => void;
@@ -102,11 +108,14 @@ export function ProjectShell({
   onHome,
 }: ProjectShellProps) {
   const auth = useAuth();
+  const runtime = useRuntimeConnection();
+  const openedGeneration = useRef(runtime.generation);
+  const previewPaused = runtime.generation !== openedGeneration.current || runtime.status !== "ready";
   const [state, dispatch] = useReducer(rendererReducer, initialRendererState);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [sendingInitialPrompt, setSendingInitialPrompt] = useState(false);
   const [creatingConversation, setCreatingConversation] = useState(false);
-  const [agentCollapsed, setAgentCollapsed] = useState(view === "design");
+  const [agentCollapsed, setAgentCollapsed] = useState(view === "design" && !initialPrompt && !initialDraft);
   const [designOpen, setDesignOpen] = useState(view === "design");
   useEffect(() => { setDesignOpen(view === "design"); }, [view]);
   const changeWorkspaceView = useCallback((open: boolean, options?: { replace?: boolean }): void => {
@@ -235,17 +244,19 @@ export function ProjectShell({
       onOpen: () => dispatch({ type: "connection", status: "open" }),
       onError: () => dispatch({ type: "connection", status: "reconnecting" }),
       onReset: async () => {
-        const detail = await getConversation(projectId, selectedConversationId, true);
-        dispatch({
-          type: "conversation-loaded",
-          detail,
-        });
+        const [project, detail] = await Promise.all([getProject(projectId), getConversation(projectId, selectedConversationId, true)]);
+        dispatch({ type: "initialized", project, detail });
+        setWorkspaceRevision((value) => value + 1);
         return detail.cursor;
       },
     });
   }
 
   useEffect(() => {
+    if (runtime.status !== "ready") {
+      dispatch({ type: "connection", status: "reconnecting" });
+      return;
+    }
     let disposed = false;
 
     async function bootstrap() {
@@ -278,12 +289,9 @@ export function ProjectShell({
           detail,
         });
         subscribe(detail.cursor, selected.id);
+        if (runtime.recovered) setWorkspaceRevision((value) => value + 1);
 
-        if (supportsWebPreview(project) && project.preview.status === "stopped") {
-          void startPreview(project.id).catch((error) => {
-            if (!disposed) dispatch({ type: "notice", message: errorMessage(error) });
-          });
-        }
+
 
       } catch (error) {
         if (!disposed) dispatch({ type: "fatal", message: errorMessage(error) });
@@ -296,7 +304,16 @@ export function ProjectShell({
       unsubscribeEvents.current?.();
       unsubscribeEvents.current = undefined;
     };
-  }, [projectId]);
+  }, [projectId, runtime.generation, runtime.status]);
+
+  const previewSupported = supportsWebPreview(state.project);
+  useEffect(() => {
+    if (!previewSupported || runtime.status !== "ready") return;
+    const leaseId = crypto.randomUUID();
+    void acquirePreview(projectId, leaseId, true, previewPaused).catch(() => {});
+    const timer = setInterval(() => { void acquirePreview(projectId, leaseId).catch(() => {}); }, 20_000);
+    return () => { clearInterval(timer); void releasePreview(projectId, leaseId).catch(() => {}); };
+  }, [projectId, previewSupported, runtime.generation, runtime.status]);
 
   useEffect(() => {
     if (!state.project || state.phase !== "ready" || !conversationId || state.conversation?.id === conversationId) return;
@@ -334,8 +351,15 @@ export function ProjectShell({
     const conversation = state.conversation;
     if (
       state.connection !== "open" || !project || !conversation || conversation.id !== conversationId ||
-      !initialPrompt || initialPromptAttempted.current
+      !initialPrompt || initialPromptAttempted.current || initialPrompt.generation !== runtime.generation || runtime.status !== "ready"
     ) return;
+    sendInitialPrompt();
+  }, [state.connection, state.project?.id, state.conversation?.id, conversationId, initialPrompt, runtime.generation, runtime.status]);
+
+  function sendInitialPrompt(): void {
+    const project = state.project;
+    const conversation = state.conversation;
+    if (!initialPrompt || !project || !conversation || conversation.id !== conversationId || sendingInitialPrompt || runtime.status !== "ready") return;
     initialPromptAttempted.current = true;
     setSendingInitialPrompt(true);
     void sendPrompt(project.id, conversation.id, initialPrompt.prompt, [], initialPrompt.images, initialPrompt.mode, initialPrompt.mentions, initialPrompt.attachments).then(() => {
@@ -346,7 +370,7 @@ export function ProjectShell({
       onInitialPromptHandled?.();
       setSendingInitialPrompt(false);
     });
-  }, [state.connection, state.project?.id, state.conversation?.id, conversationId, initialPrompt]);
+  }
 
   useEffect(() => {
     const element = timeline.current;
@@ -389,7 +413,7 @@ export function ProjectShell({
     const project = state.project;
     const busy = sendingInitialPrompt ||
       state.agent.status === "running" || state.agent.status === "cancelling";
-    if (!project || (!isWebRuntimeProjectType(project.type) && project.type !== "interactive-story") || auth.state.status !== "signed-in" || state.phase !== "ready" || publishing || busy) return;
+    if (runtime.recovered || !project || (!isWebRuntimeProjectType(project.type) && project.type !== "interactive-story") || auth.state.status !== "signed-in" || state.phase !== "ready" || publishing || busy) return;
     const pending = takePendingPublish(sessionStorage, project.id);
     if (pending) void publish(pending).catch(() => undefined);
   }, [auth.state.status, state.phase, state.project?.id, state.project?.type, state.agent.status, sendingInitialPrompt, publishing]);
@@ -579,12 +603,13 @@ export function ProjectShell({
     return removeFollowUp(item.turnId);
   }
 
-  async function restartPreview(updated = project) {
+  async function restartPreview(updated = project, reinstall = false) {
     if (!updated || updated.preview.status === "starting") return;
     dispatch({ type: "notice", message: undefined });
     try {
-      await startPreview(updated.id);
+      await startPreview(updated.id, reinstall);
     } catch (error) {
+      if (error instanceof ApiError && error.code === "PREVIEW_CANCELLED") return;
       dispatch({ type: "notice", message: errorMessage(error) });
     }
   }
@@ -780,6 +805,7 @@ export function ProjectShell({
           <div className="timeline" aria-live="polite">
             {state.phase === "loading" ? <TimelineSkeleton /> : null}
             <Activity mode={agentIsCollapsed ? "hidden" : "visible"}>
+              <ErrorBoundary label="Conversation" resetKey={conversation?.id}>
               <AgentTimeline
                 turns={state.turns}
                 projectId={projectId}
@@ -790,6 +816,7 @@ export function ProjectShell({
                 onRevise={revisePrompt}
                 onAddToChat={addToChat}
               />
+              </ErrorBoundary>
             </Activity>
           </div>
 
@@ -812,6 +839,13 @@ export function ProjectShell({
             </div>
           ) : null}
 
+          {initialPrompt && initialPrompt.generation !== runtime.generation && !initialPromptAttempted.current ? <div className="paused-initial-prompt" role="status">
+            <p>Your initial message was paused while the service restarted.</p>
+            <details><summary>Review message</summary><pre>{initialPrompt.prompt}</pre>
+              {initialPrompt.images.length || initialPrompt.attachments?.length ? <p>{initialPrompt.images.length + (initialPrompt.attachments?.length ?? 0)} attachments retained</p> : null}
+            </details>
+            <button type="button" disabled={runtime.status !== "ready" || state.connection !== "open" || !conversation || conversation.id !== conversationId} onClick={sendInitialPrompt}>Send original message</button>
+          </div> : null}
           {!questionnaire && state.plan.mode !== "awaiting_approval" ? <Composer
             key={conversation?.id}
             projectId={project?.id}
@@ -890,18 +924,24 @@ export function ProjectShell({
         onLostPointerCapture={finishAgentResize}
       />
 
+      <ErrorBoundary label="Workspace" resetKey={project?.id} onHome={onHome}>
       {!project ? <section className="viewer-pane" /> : project.type !== "interactive-story" && project.type !== "asset-canvas" ? (
         <CodingWorkspace
           project={project}
           agentBusy={agentBusy}
           publishing={publishing}
           workspaceRevision={workspaceRevision}
+          previewPaused={previewPaused}
           openFileRequest={openFileRequest}
           onPublish={publish}
           publishDialog={publishDialogStatus}
           onOpenPublish={() => setPublishDialog({ projectId: project.id, status: "open" })}
           onClosePublish={() => setPublishDialog(undefined)}
           onRestart={restartPreview}
+          onStop={async () => {
+            try { await stopPreview(project.id); } catch (cause) { dispatch({ type: "notice", message: errorMessage(cause) }); }
+          }}
+          onAskAgent={requestPrompt}
           designOpen={designOpen}
           onDesignOpenChange={changeWorkspaceView}
           onDesignSaveReady={registerDesignSave}
@@ -949,6 +989,7 @@ export function ProjectShell({
         onAskAgent={requestPrompt}
         onSendToAgent={sendEditorRequest}
       />}
+      </ErrorBoundary>
     </main>
   );
 }
