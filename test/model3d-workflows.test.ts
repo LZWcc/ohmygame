@@ -356,6 +356,49 @@ describe("operation capability discovery", () => {
 });
 
 describe("canvas 3D recovery", () => {
+  it("shares confirmed Meshy stages when a copied project retries while the original is polling", async () => {
+    const location = await directory(), library = new AssetLibrary(location), projects = new ProjectManager(location, library);
+    const request = meshyService(), respond = request.getMockImplementation()!;
+    let unblock!: () => void;
+    const blocked = new Promise<void>((resolve) => { unblock = resolve; });
+    let originalPolling = false, previewPolls = 0;
+    request.mockImplementation(async (url, init) => {
+      if (String(url).endsWith("/text-to-3d/meshy-1") && ++previewPolls === 1) {
+        originalPolling = true;
+        await blocked;
+      }
+      return respond(url, init);
+    });
+    const tools = new ToolRunner(location, { generate: vi.fn() }, new MeshyProvider(() => "key", request, 0), undefined, library);
+    const store = new CanvasStore(projects, library, tools);
+    const phases = () => posts(request).map(([, init]) => JSON.parse(String(init!.body)).mode);
+    try {
+      await Promise.all([library.load(), projects.load(), tools.load()]);
+      const source = await projects.create("Source", "asset-canvas");
+      const boardId = (await store.workspace(source.id)).boards[0]!.id;
+      const board = await store.board(source.id, boardId);
+      board.board.nodes.push({ id: "model", type: "model-3d", position: { x: 0, y: 0 }, data: { operation: "text", prompt: "Tower", images: [], model: meshyModel, targetPolycount: 1000, texture: true, pbr: false } });
+      board.board.editorLayout.nodes.model = { x: 0, y: 0 };
+      await store.saveBoard(source.id, board.board, board.revision);
+      const original = await store.generateNode(source.id, boardId, "model");
+      await vi.waitFor(() => expect(originalPolling).toBe(true));
+      const copy = await projects.duplicate(source.id);
+      expect((await store.jobs(copy.id))[0]?.status).toBe("cancelled");
+      const sourceHistory = JSON.parse(await readFile(path.join(source.workspacePath, "canvas/jobs.json"), "utf8"));
+      const copyHistory = JSON.parse(await readFile(path.join(copy.workspacePath, "canvas/jobs.json"), "utf8"));
+      expect(copyHistory[0].recoveryId).toBe(sourceHistory[0].recoveryId);
+      await store.retry(copy.id, original.id);
+      await vi.waitFor(async () => expect((await store.jobs(copy.id))[0]?.status).toBe("succeeded"));
+      expect(phases()).toEqual(["preview", "refine"]);
+      unblock();
+      await vi.waitFor(async () => expect((await store.jobs(source.id))[0]?.status).toBe("succeeded"));
+      expect(phases()).toEqual(["preview", "refine"]);
+    } finally {
+      unblock();
+      await store.close(); await tools.close();
+    }
+  });
+
   it("resumes the original retexture task after reopening the canvas and preserves asset axis metadata", async () => {
     const location = await directory(), library = new AssetLibrary(location), projects = new ProjectManager(location, library);
     const request = meshyService(), original = request.getMockImplementation()!; let failed = true;
