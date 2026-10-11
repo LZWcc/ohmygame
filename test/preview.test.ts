@@ -14,8 +14,9 @@ afterEach(async () => {
 });
 
 describe("PreviewManager", () => {
-  it("isolates project binaries during install and preview, and retries failed installs", async () => {
+  it("isolates project binaries and the daemon token during install and preview, and retries failed installs", async () => {
     vi.stubEnv("ESBUILD_BINARY_PATH", "/app/esbuild");
+    vi.stubEnv("OHMYGAME_DAEMON_TOKEN", "secret");
     const workspacePath = await mkdtemp(path.join(tmpdir(), "ohmygame-preview-retry-"));
     await writeFile(path.join(workspacePath, "package.json"), JSON.stringify({
       private: true, scripts: { postinstall: "node install.mjs", dev: "node server.mjs" },
@@ -23,6 +24,7 @@ describe("PreviewManager", () => {
     await writeFile(path.join(workspacePath, "install.mjs"), `
       import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
       if (process.env.ESBUILD_BINARY_PATH) throw new Error("app binary leaked into install");
+      if (process.env.OHMYGAME_DAEMON_TOKEN) throw new Error("daemon token leaked into install");
       const attempts = existsSync("attempts") ? Number(readFileSync("attempts", "utf8")) + 1 : 1;
       writeFileSync("attempts", String(attempts));
       mkdirSync("node_modules", { recursive: true });
@@ -31,6 +33,7 @@ describe("PreviewManager", () => {
     await writeFile(path.join(workspacePath, "server.mjs"), `
       import { createServer } from "node:http";
       if (process.env.ESBUILD_BINARY_PATH) throw new Error("app binary leaked into preview");
+      if (process.env.OHMYGAME_DAEMON_TOKEN) throw new Error("daemon token leaked into preview");
       const port = Number(process.argv[process.argv.indexOf("--port") + 1]);
       createServer((_request, response) => response.end("ready")).listen(port, "127.0.0.1");
     `);
@@ -42,6 +45,7 @@ describe("PreviewManager", () => {
     expect(await (await fetch(url)).text()).toBe("ready");
     expect(await readFile(path.join(workspacePath, "attempts"), "utf8")).toBe("2");
     expect(process.env.ESBUILD_BINARY_PATH).toBe("/app/esbuild");
+    expect(process.env.OHMYGAME_DAEMON_TOKEN).toBe("secret");
   });
 
   it("reuses the same process for concurrent player and agent launches and subsequent opens", async () => {
@@ -159,6 +163,23 @@ describe("PreviewManager", () => {
     await vi.waitFor(() => expect(isProcessRunning(pid)).toBe(false));
     expect(project.preview.status).toBe("error");
     expect(project.preview.error).toContain("server error");
+  });
+
+  it.skipIf(process.platform === "win32")("fails the start when the package manager is not installed and starts once it is", async () => {
+    const workspacePath = await createWorkspace(false);
+    const project = createProject(workspacePath);
+    const events = new RuntimeEventBus();
+    const manager = new PreviewManager(events, { readinessTimeoutMs: 2_000 });
+    managers.push(manager);
+    vi.stubEnv("PATH", await mkdtemp(path.join(tmpdir(), "ohmygame-preview-path-")));
+
+    await expect(manager.start(project)).rejects.toMatchObject({ code: "ENOENT", path: "npm" });
+    expect(project.preview.status).toBe("error");
+    expect(project.preview.error).toContain("npm");
+    expect(events.since(project.id).filter((event) => event.type === "preview.error").map((event) => event.data)).toEqual([{ error: project.preview.error }]);
+    vi.unstubAllEnvs();
+    const url = await manager.start(project);
+    expect(await (await fetch(url)).text()).toBe("ready");
   });
 
   it("starts the preview from the configured startup directory", async () => {
