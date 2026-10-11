@@ -333,7 +333,7 @@ function ShimmerText({ text, active = true, className, title, role }: {
   active?: boolean;
   className?: string;
   title?: string;
-  role?: "status";
+  role?: "status" | "alert";
 }) {
   const classes = [className, active ? "activity-shimmer" : undefined].filter(Boolean).join(" ") || undefined;
   return (
@@ -353,7 +353,7 @@ function ActiveWork({ display, now }: { display: TurnDisplay; now: number }) {
       </div>
       {display.work.length > 0 ? (
         <div className="active-work-items">
-          <WorkItems items={display.work} images={display.user?.images} />
+          <WorkItems items={display.work} images={display.user?.images} activeRetryId={display.activeRetryId} />
         </div>
       ) : null}
     </section>
@@ -392,10 +392,11 @@ function CompletedWork({ display }: { display: TurnDisplay }) {
   );
 }
 
-function WorkItems({ items, images, failed = false }: { items: TurnDisplay["work"]; images?: PromptImage[]; failed?: boolean }) {
+function WorkItems({ items, images, failed = false, activeRetryId }: { items: TurnDisplay["work"]; images?: PromptImage[]; failed?: boolean; activeRetryId?: string }) {
   const rendered = items.map((item) => {
     if (item.kind === "tool-group") return <ToolActivityGroup key={item.id} tools={item.tools} thinking={item.thinking} />;
     if (item.kind === "thinking") return <ThinkingActivity key={item.id} />;
+    if (item.item.type === "retry") return <AgentErrorActivity key={item.item.id} error={item.item.error} retry={item.item} active={item.item.id === activeRetryId} />;
     return <TimelineItem
       key={item.item.id}
       item={item.item}
@@ -542,12 +543,6 @@ function TimelineItem({ item, images, hideError = false }: { item: ThreadItem; i
     );
   }
   if (item.type === "dynamicToolCall" || item.type === "mcpToolCall") return <ToolActivity item={item} />;
-  if (item.type === "retry") {
-    return <AgentErrorActivity
-      retryLabel={item.status === "failed" ? undefined : `Reconnecting ${item.attempt}/${item.maxAttempts}`}
-      error={item.error}
-    />;
-  }
   if (item.type === "contextCompaction") {
     const label = compactionLabel(item);
     const icon = <Diskette size={13} aria-hidden="true" />;
@@ -595,13 +590,35 @@ function TimelineItem({ item, images, hideError = false }: { item: ThreadItem; i
   return null;
 }
 
-function AgentErrorActivity({ error, retryLabel }: { error: ThreadItemError; retryLabel?: string }) {
-  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
-  useEffect(() => { setCopyStatus("idle"); }, [error]);
-  const failed = retryLabel === undefined;
+function AgentErrorActivity({ error, retry, active = false }: { error: ThreadItemError; retry?: Extract<ThreadItem, { type: "retry" }>; active?: boolean }) {
+  const failed = !retry || retry.status === "failed";
+  const shimmering = active && retry?.status === "inProgress";
   const presentation = agentErrorPresentation(error);
-  const label = error.code === "model_not_configured" ? presentation.title : retryLabel ?? presentation.title;
+  const label = failed ? presentation.title : `Reconnecting ${retry.attempt}/${retry.maxAttempts}`;
+  const preview = failed && !error.code ? error.message.replace(/\s+/g, " ").trim() : "";
+  const summary = preview ? `${label} — ${preview}` : label;
   const Icon = failed ? (["dns_error", "connection_refused", "connection_reset", "timeout", "tls_error", "stream_error", "network_error"].includes(error.code ?? "") ? WifiOff : X) : Wifi;
+  return (
+    <LazyDetails className={`connection-activity-details${failed ? " connection-activity-failed" : ""}`} summary={
+      <summary className="tool-activity tool-row timeline-activity connection-activity">
+        <Icon size={13} aria-hidden="true" />
+        <ShimmerText text={summary} active={shimmering} className="tool-label" title={summary} role={failed ? "alert" : shimmering ? "status" : undefined} />
+        <ChevronRight className="tool-detail-chevron" size={12} aria-hidden="true" />
+      </summary>}>
+      <AgentErrorDetails error={error} guidance={failed ? presentation.message : undefined} />
+    </LazyDetails>
+  );
+}
+
+function AgentErrorDetails({ error, guidance }: { error: ThreadItemError; guidance?: string }) {
+  const [copyStatus, setCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const copied = copyStatus === "copied";
+  useEffect(() => { setCopyStatus("idle"); }, [error]);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopyStatus("idle"), 1_500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
   const rows = agentErrorDiagnosticRows(error);
   async function copyDiagnostics() {
     try {
@@ -610,17 +627,13 @@ function AgentErrorActivity({ error, retryLabel }: { error: ThreadItemError; ret
     } catch { setCopyStatus("failed"); }
   }
   return (
-    <div className={`connection-activity-details${failed ? " connection-activity-failed" : ""}`} role={failed ? "alert" : undefined}>
-      <div className="tool-activity tool-row timeline-activity connection-activity">
-        <Icon size={13} aria-hidden="true" /><span className="tool-label">{label}</span>
-      </div>
-      {failed ? <p className="connection-activity-guidance">{presentation.message}</p> : null}
-      <details className="connection-activity-diagnostics">
-        <summary>Details <ChevronRight className="tool-detail-chevron" size={12} aria-hidden="true" /></summary>
-        <dl className="connection-activity-error">{rows.map(([label, value], index) => <div key={`${label}:${index}`}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
-        <button type="button" className="connection-activity-copy" onClick={() => void copyDiagnostics()}><Copy size={12} aria-hidden="true" />{copyStatus === "copied" ? "Copied" : "Copy diagnostics"}</button>
-        {copyStatus === "failed" ? <p className="connection-activity-guidance" role="status">Could not copy. Select the details above to copy them manually.</p> : null}
-      </details>
+    <div className="connection-activity-diagnostics">
+      {guidance ? <p className="connection-activity-guidance">{guidance}</p> : null}
+      <dl className="connection-activity-error">{rows.map(([label, value], index) => <div key={`${label}:${index}`}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
+      {copyStatus === "failed" ? <p className="connection-activity-guidance" role="status">Could not copy. Select the details above to copy them manually.</p> : null}
+      <button type="button" className="connection-activity-copy" aria-label={copied ? "Diagnostics copied" : "Copy diagnostics"} title={copied ? "Copied" : "Copy diagnostics"} onClick={() => void copyDiagnostics()}>
+        {copied ? <Check size={13} aria-hidden="true" /> : <Copy size={13} aria-hidden="true" />}
+      </button>
     </div>
   );
 }
