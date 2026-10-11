@@ -47,7 +47,7 @@ vi.doMock(path.resolve("src/renderer/editor-canvas.tsx"), async (original) => ({
     captured.props = props;
     return <ReactFlowProvider>{props.nodes.filter((node) => node.type === "animate-3d").map((node) => {
       const Component = props.nodeTypes![node.type!];
-      return <Component key={node.id} {...node} type={node.type!} selected dragging={false} draggable selectable deletable zIndex={0} isConnectable positionAbsoluteX={node.position.x} positionAbsoluteY={node.position.y} />;
+      return <Component key={node.id} {...node} type={node.type!} selected={Boolean(node.selected)} dragging={false} draggable selectable deletable zIndex={0} isConnectable positionAbsoluteX={node.position.x} positionAbsoluteY={node.position.y} />;
     })}</ReactFlowProvider>;
   },
 }));
@@ -165,6 +165,8 @@ it("loads moves only when a picker opens and retries errors using legacy native 
     data: { model: { provider: "meshy", id: "meshy-7.1" }, actionIds: [0], heightMeters: 1.7 } }));
   api.animationActions.mockRejectedValueOnce(new Error("offline"));
   await openCanvas("asset-canvas");
+  expect(api.animationActions).not.toHaveBeenCalled();
+  await act(async () => captured.props!.onNodesChange!(["first", "second"].map((id) => ({ id, type: "select", selected: true }))));
   expect(api.animationActions).not.toHaveBeenCalled();
   expect(container.querySelectorAll('[aria-label="Animation provider: Meshy"]')).toHaveLength(2);
   const moves = [...container.querySelectorAll("button")].find((button) => button.textContent === "1 move")!;
