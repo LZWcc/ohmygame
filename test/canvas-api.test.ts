@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateCanvasDocument, generateCanvasText, generateCanvasTable } from "../src/renderer/canvas-api.js";
+import { generateCanvasDocument, generateCanvasText, generateCanvasTable, getCanvasBoard } from "../src/renderer/canvas-api.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -24,5 +24,14 @@ describe("canvas generation API", () => {
     await generateCanvasText("project", "Summarize", model, "off", referenceSource);
     await generateCanvasDocument("project", "rules", { instruction: "Revise", model, revision: "1", referenceSource });
     for (const [, options] of fetchMock.mock.calls) expect(JSON.parse(options!.body as string)).toHaveProperty("referenceSource", referenceSource);
+  });
+  it("bounds local canvas reads without applying that timeout to generation", async () => {
+    vi.stubGlobal("window", {});
+    const fetchMock = vi.fn(async (_url: string, _options?: RequestInit) => Response.json({}));
+    vi.stubGlobal("fetch", fetchMock);
+    await getCanvasBoard("project", "board");
+    await generateCanvasText("project", "Write", { provider: "openai", id: "test" });
+    expect(fetchMock.mock.calls[0]![1]).toHaveProperty("signal");
+    expect(fetchMock.mock.calls[1]![1]).not.toHaveProperty("signal");
   });
 });

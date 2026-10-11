@@ -51,6 +51,10 @@ const node = (type: string, data: object) => ({
   required: ["id", "type", "data"],
   properties: { id, type: { const: type }, title: { type: "string", maxLength: 200 }, description: { type: "string", maxLength: 2000 }, data },
 });
+const model3DOptions = { type: "object", additionalProperties: false, properties: {
+  pose: { enum: ["a-pose", "t-pose"] }, textureModel: id, textureQuality: { enum: ["fast", "standard", "detailed", "extreme"] },
+  rigModel: { enum: ["v1.0-20240301", "v2.5-20260210"] }, rigType: { enum: ["biped", "quadruped", "hexapod", "octopod", "serpentine", "aquatic"] }, animateInPlace: { type: "boolean" },
+} } as const;
 const nodes = [
   node("table", { type: "object", additionalProperties: false, required: ["tableId"], properties: { tableId: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,100}$" } } }),
   node("document", { type: "object", additionalProperties: false, required: ["documentId"], properties: { documentId: id, references: nodeReferences } }),
@@ -97,7 +101,9 @@ const nodes = [
     required: ["targetPolycount", "texture", "pbr", "images"],
     properties: {
       model,
-      targetPolycount: { type: "integer", minimum: 100, maximum: MODEL_3D_MAX_POLYCOUNT },
+      operation: { enum: ["image", "text", "retexture", "remesh"] }, prompt: { type: "string" }, source: reference,
+      promptSource: reference.oneOf[1], options: model3DOptions,
+      targetPolycount: { type: "integer", minimum: 48, maximum: MODEL_3D_MAX_POLYCOUNT },
       texture: { type: "boolean" },
       pbr: { type: "boolean" },
       images: { type: "array", maxItems: MODEL_3D_MAX_REFERENCE_IMAGES, items: reference },
@@ -109,9 +115,9 @@ const nodes = [
     additionalProperties: false,
     required: ["heightMeters", "actionIds"],
     properties: {
-      source: reference,
+      source: reference, model, options: model3DOptions,
       heightMeters: { type: "number", exclusiveMinimum: 0, maximum: 100 },
-      actionIds: { type: "array", maxItems: MAX_ANIMATION_ACTIONS, uniqueItems: true, items: { type: "integer", minimum: 0 } },
+      actionIds: { type: "array", maxItems: MAX_ANIMATION_ACTIONS, uniqueItems: true, items: { anyOf: [{ type: "integer", minimum: 0 }, { type: "string", minLength: 1, maxLength: 120 }] } },
       assetId: id,
     },
   }),

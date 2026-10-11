@@ -1,3 +1,4 @@
+import { TEST_GLB } from "./model3d-fixture.js";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -32,7 +33,7 @@ function remote(remaining = 5) {
     if (route === "/v1/me/quotas") return Response.json(quotas(userId, remaining));
     if (route === "/v1/cloud/3d/jobs") return Response.json({ id: "job-1", provider: HYPER3D_CONNECTION_ID, modelId: MODEL.id, status: "running", pollAfterMs: 1 });
     if (route === "/v1/cloud/jobs/job-1") return Response.json({ id: "job-1", provider: HYPER3D_CONNECTION_ID, modelId: MODEL.id, status: "succeeded", pollAfterMs: 5000 });
-    if (route === "/v1/cloud/jobs/job-1/result") return new Response("GLB-result");
+    if (route === "/v1/cloud/jobs/job-1/result") return new Response(new Uint8Array(TEST_GLB));
     if (route === "/v1/cloud/jobs") return Response.json([]);
     throw new Error(`Unexpected route ${route}`);
   });
@@ -198,7 +199,7 @@ describe("desktop free cloud connection", () => {
     const wait = vi.fn(async (_ms: number, _signal: AbortSignal) => {});
     const client = new CloudModelsClient("https://cloud.example", request, wait);
     await client.setSession({ accessToken: "account-token-1", userId: "user-1" });
-    expect(await client.generate(generation)).toMatchObject({ requestId: "job-1", bytes: Buffer.from("GLB-result") });
+    expect(await client.generate(generation)).toMatchObject({ requestId: "job-1", bytes: TEST_GLB });
     const creates = request.mock.calls.filter(([url]) => String(url).endsWith("/3d/jobs"));
     expect(creates).toHaveLength(2);
     expect(creates[0]![1]?.headers).toEqual(creates[1]![1]?.headers);

@@ -635,7 +635,8 @@ export function createApp(options: AppOptions = {}) {
       if (!selected) {
         const injected = usage === "image" ? options.imageGenerator : usage === "video" ? options.videoGenerator : options.model3DGenerator;
         if (injected) return input;
-        const catalog = videoCatalog ?? await (usage === "image" ? providerImages : providerModels3D).catalog();
+        const processing3D = usage === "3d" && "operation" in input && (input.operation === "retexture" || input.operation === "remesh");
+        const catalog = processing3D ? { models: (await providerModels3D.operationModels()).filter((model) => model.operations?.includes(input.operation!)) } : videoCatalog ?? await (usage === "image" ? providerImages : providerModels3D).catalog();
         const first = catalog.models[0];
         if (first) selected = { provider: first.provider, id: first.id };
       }
@@ -2280,14 +2281,24 @@ export function createApp(options: AppOptions = {}) {
       return reply.code(204).send();
     });
   }
-  app.get("/model3d-animations", async (_request, reply) => {
-    if (!meshySettings.get().configured || !providerEnabled("meshy")) return [];
+  app.get("/model3d-operations", async () => providerModels3D.operationModels());
+  app.get<{ Querystring: { provider?: string; id?: string; rigModel?: string; rigType?: string } }>("/model3d-animations", async (request, reply) => {
+    const { provider, id, rigModel, rigType } = request.query;
+    if ((provider && !id) || (!provider && id)) return reply.code(400).send({ error: "Specify provider and model ID together" });
     try {
-      return await tools.animationActions();
+      return await tools.animationActions(provider && id ? { provider, id } : undefined, {
+        ...(rigModel ? { rigModel: rigModel as import("../shared/contracts.js").Model3DOptions["rigModel"] } : {}),
+        ...(rigType ? { rigType: rigType as import("../shared/contracts.js").Model3DOptions["rigType"] } : {}),
+      });
     } catch (cause) {
       if (cause instanceof ToolRunError) return reply.code(cause.statusCode).send({ error: cause.message });
       throw cause;
     }
+  });
+  app.get<{ Querystring: { provider: string; id: string } }>("/model3d-balance", async (request, reply) => {
+    if (!isAgentModelRef(request.query)) return reply.code(400).send({ error: "Choose a 3D connection" });
+    try { return await providerModels3D.balance(request.query); }
+    catch (cause) { if (cause instanceof Error && "statusCode" in cause) return reply.code(Number(cause.statusCode)).send({ error: cause.message }); throw cause; }
   });
 
   app.post<{ Params: { projectId: string }; Body: CreateConversationRequest }>(
@@ -2979,7 +2990,7 @@ export function createApp(options: AppOptions = {}) {
     await pluginCapabilities.host.close();
     await cloudModels.setSession(null);
     await canvasStore.close();
-    tools.close();
+    await tools.close();
     modelAuth.close();
     await agents.close();
     await Promise.allSettled([...agentPlaytests.values()].map((driver) => driver.cleanup()));

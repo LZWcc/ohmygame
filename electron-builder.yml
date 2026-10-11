@@ -2,6 +2,7 @@ appId: ai.ohmygame.desktop
 productName: OhMyGame
 asar: true
 beforePack: scripts/prepare-desktop-typebox.mjs
+afterPack: scripts/check-packaged-desktop.mjs
 asarUnpack:
   - node_modules/esbuild/**/*
   - node_modules/@esbuild/**/*

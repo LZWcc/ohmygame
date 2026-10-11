@@ -12,6 +12,7 @@ interface StoredLibrary {
 
 interface AddAssetOptions {
   prompt?: string;
+  model3d?: LibraryAsset["model3d"];
   sourceKey?: string;
   duration?: number;
   origin?: LibraryAssetOrigin;
@@ -184,6 +185,7 @@ export class AssetLibrary {
       origin,
       purpose: options.purpose ?? "asset",
       saved: origin !== "workspace",
+      ...(options.model3d ? { model3d: options.model3d } : {}),
       ...(options.duration !== undefined ? { duration: options.duration } : {}),
       ...(options.prompt?.trim() ? { prompt: options.prompt.trim() } : {}),
     };

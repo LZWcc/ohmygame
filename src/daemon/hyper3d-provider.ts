@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import type { CustomModel3DSettings } from "../shared/contracts.js";
+import type { CustomModel3DSettings, Model3DBalance } from "../shared/contracts.js";
 import { model3DPreset } from "../shared/model3d-presets.js";
 import type { ImageSource } from "./image-adapters.js";
 import { Model3DGenerationError, readModel3DResult, type Model3DGenerator, type Model3DGenerationInput } from "./model3d.js";
@@ -18,9 +18,13 @@ export class Hyper3DProvider implements Model3DGenerator {
     if (!key && this.connection?.authentication !== "none") throw new Model3DGenerationError("Hyper3D API key is not configured", 503);
     const model = settings ?? this.connection?.settings ?? model3DPreset(input.model.provider, input.model.id)?.settings;
     if (!model || model.protocol !== "hyper3d") throw new Model3DGenerationError("The selected Hyper3D model is unavailable", 400);
-    if (!input.images.length || input.images.length > model.maxReferenceImages) throw new Model3DGenerationError(`Provide 1 to ${model.maxReferenceImages} reference images`, 400);
+    const operation = input.operation ?? "image";
+    if (operation === "remesh") throw new Model3DGenerationError("Hyper3D does not support remeshing", 400);
+    if (operation === "text" && (input.images.length || !input.prompt?.trim())) throw new Model3DGenerationError("Add a text prompt without reference images", 400);
+    if (operation === "retexture" && (!input.source?.length || input.images.length !== 1)) throw new Model3DGenerationError("Hyper3D retexture requires one source GLB and one reference image", 400);
+    if (operation === "image" && (!input.images.length || input.images.length > model.maxReferenceImages)) throw new Model3DGenerationError(`Provide 1 to ${model.maxReferenceImages} reference images`, 400);
     const faces = input.targetPolycount ?? model.polycount.default;
-    if (!Number.isInteger(faces) || faces < model.polycount.min || faces > model.polycount.max) throw new Model3DGenerationError(`Hyper3D face count must be between ${model.polycount.min} and ${model.polycount.max}`, 400);
+    if (operation !== "retexture" && (!Number.isInteger(faces) || faces < model.polycount.min || faces > model.polycount.max)) throw new Model3DGenerationError(`Hyper3D face count must be between ${model.polycount.min} and ${model.polycount.max}`, 400);
     const texture = input.texture ?? model.defaults?.texture ?? model.supportsTexture;
     const pbr = texture && (input.pbr ?? model.defaults?.pbr ?? false);
     if (texture && !model.supportsTexture || pbr && !model.supportsPbr) throw new Model3DGenerationError("The selected model does not support these texture options", 400);
@@ -29,18 +33,30 @@ export class Hyper3DProvider implements Model3DGenerator {
       if (!["image/png", "image/jpeg"].includes(image.mediaType) || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data)) throw new Model3DGenerationError("Hyper3D references must be PNG or JPEG", 400);
       const bytes = Buffer.from(image.data, "base64"); size += bytes.length;
       if (!bytes.length || size > 20 * 1024 * 1024) throw new Model3DGenerationError("Hyper3D references must total at most 20 MB", 413);
-      form.append("images", new Blob([bytes], { type: image.mediaType }), `reference-${index}.${image.mediaType === "image/png" ? "png" : "jpg"}`);
+      form.append(operation === "retexture" ? "image" : "images", new Blob([bytes], { type: image.mediaType }), `reference-${index}.${image.mediaType === "image/png" ? "png" : "jpg"}`);
     });
-    form.set("tier", input.model.id);
-    if (input.model.id.startsWith("Gen-2.5-")) form.set("texture_mode", "medium");
-    form.set("geometry_file_format", "glb"); form.set("mesh_mode", "Raw");
-    form.set("quality_override", String(faces)); form.set("material", !texture ? "None" : pbr ? "PBR" : "Shaded");
-    const timeout = AbortSignal.timeout(25 * 60_000);
+    if (input.prompt?.trim()) form.set("prompt", input.prompt.trim());
+    if (operation === "retexture") form.append("model", new Blob([new Uint8Array(input.source!)], { type: "model/gltf-binary" }), "model.glb");
+    if (input.options?.pose) form.set("TAPose", "true");
+    if (operation !== "retexture") form.set("tier", input.model.id);
+    if (operation !== "retexture" && input.model.id.startsWith("Gen-2.5-")) form.set("texture_mode", "medium");
+    form.set("geometry_file_format", "glb");
+    if (operation !== "retexture") { form.set("mesh_mode", "Raw"); form.set("quality_override", String(faces)); }
+    form.set("material", operation !== "retexture" && !texture ? "None" : pbr ? "PBR" : "Shaded");
+    if (operation === "retexture") form.set("resolution", "Basic");
+    const timeout = AbortSignal.timeout(60 * 60_000);
     const combined = AbortSignal.any([timeout, ...(signal ? [signal] : [])]);
     try {
-      const submitted = await this.json("rodin", key, { method: "POST", body: form, signal: combined });
-      const uuid = submitted.uuid, subscriptionKey = record(submitted.jobs).subscription_key;
-      if (typeof uuid !== "string" || !uuid || typeof subscriptionKey !== "string" || !subscriptionKey) throw new Model3DGenerationError("Hyper3D returned no task credentials. Check your provider dashboard before retrying");
+      const endpoint = operation === "retexture" ? "rodin_texture_only" : "rodin";
+      const submit = async () => {
+        const submitted = await this.json(endpoint, key, { method: "POST", body: form, signal: combined });
+        const uuid = submitted.uuid, subscriptionKey = record(submitted.jobs).subscription_key;
+        if (typeof uuid !== "string" || !uuid || typeof subscriptionKey !== "string" || !subscriptionKey) throw new Model3DGenerationError("Hyper3D returned no task credentials. Check your provider dashboard before retrying");
+        return { uuid, subscriptionKey };
+      };
+      const execution = input.execution;
+      const fingerprintInput = await Promise.all([...form].map(async ([name, value]) => [name, typeof value === "string" ? value : Buffer.from(await value.arrayBuffer()).toString("base64")]));
+      const { uuid, subscriptionKey } = execution ? await execution.submitted("generate", JSON.stringify([this.connection?.baseUrl ?? API, key, this.connection?.headers, this.connection?.authentication]), fingerprintInput, submit) : await submit();
       while (true) {
         await delay(this.pollIntervalMs, undefined, { signal: combined });
         let status: Record<string, unknown>;
@@ -73,6 +89,14 @@ export class Hyper3DProvider implements Model3DGenerator {
       throw cause;
     }
   }
+  async accountBalance(signal?: AbortSignal): Promise<Model3DBalance> {
+    if (!this.isEnabled()) throw new Model3DGenerationError("Hyper3D provider is disabled", 409);
+    const key = this.apiKey();
+    if (!key && this.connection?.authentication !== "none") throw new Model3DGenerationError("Hyper3D API key is not configured", 503);
+    const value = await this.json("check_balance", key, { signal });
+    if (typeof value.balance !== "number") throw new Model3DGenerationError("Hyper3D returned an invalid balance");
+    return { balance: value.balance };
+  }
   private async json(endpoint: string, key: string | undefined, init: RequestInit): Promise<Record<string, unknown>> {
     let response: Response;
     try { response = await this.request(`${(this.connection?.baseUrl ?? API).replace(/\/+$/, "")}/${endpoint}`, { ...init, redirect: "error",
@@ -80,10 +104,10 @@ export class Hyper3DProvider implements Model3DGenerator {
       headers: { ...this.connection?.headers, ...(this.connection?.authentication === "none" ? {} : { authorization: `Bearer ${key}` }), ...init.headers } }); }
     catch (cause) {
       if (init.signal?.aborted) throw cause;
-      throw new Model3DGenerationError(endpoint === "rodin" ? "Hyper3D submission could not be confirmed. Check your provider dashboard before retrying" : "Could not reach Hyper3D");
+      throw new Model3DGenerationError((endpoint === "rodin" || endpoint === "rodin_texture_only") ? "Hyper3D submission could not be confirmed. Check your provider dashboard before retrying" : "Could not reach Hyper3D");
     }
     const body = record(await response.json().catch(() => undefined));
-    if (response.ok && !body.error) return body;
+    if (response.ok && (!body.error || Array.isArray(body.error) && body.error.length === 0)) return body;
     if (response.status === 401 || response.status === 403) throw new Model3DGenerationError("Hyper3D API key was rejected", 503);
     if (response.status === 429 || body.error === "API_PARALLELISM_LIMIT_REACHED") {
       const retry = response.headers.get("retry-after");

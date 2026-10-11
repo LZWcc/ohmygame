@@ -2,6 +2,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, Code2, ExternalLink, LoaderCircle
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type {
   CustomProviderDetails,
+  CustomProviderModel,
   ModelAuthEvent,
   ModelAuthMethod,
   ModelAuthNotification,
@@ -32,6 +33,8 @@ import {
 import { PROVIDER_ICONS } from "./provider-icons.js";
 import { CustomProviderDialog, PROVIDER_API_LABELS, type CustomProviderField } from "./custom-provider-dialog.js";
 import { ProviderModels } from "./provider-models.js";
+import { Provider3DBalance } from "./provider-3d-balance.js";
+import { MODEL3D_CONNECTION_ID } from "../shared/model3d-operations.js";
 import { GlobalMediaModelDefaults } from "./media-model-defaults.js";
 import { SegmentedControl } from "./segmented-control.js";
 import { useAuth } from "./auth.js";
@@ -159,7 +162,7 @@ function ProviderList({ onProvider }: { onProvider: (provider: ProviderSummary) 
       <div className="settings-provider-list">
         <div className="settings-provider-toolbar">
           <SegmentedControl className="settings-provider-filters" label="Filter providers by capability" options={PROVIDER_CAPABILITY_FILTERS} value={capability} onChange={setCapability} />
-          <button className="settings-secondary-button settings-provider-add" type="button" onClick={() => setAdding("custom")}><Plus size={13} />Add provider</button>
+          <button className="settings-add-button settings-provider-add" type="button" onClick={() => setAdding("custom")}><Plus size={13} />Add provider</button>
         </div>
         {capability !== "language" ? <GlobalMediaModelDefaults capability={capability} /> : null}
         {loading ? <div className="settings-loading"><LoaderCircle className="spin" size={18} />Loading providers</div> : null}
@@ -292,13 +295,13 @@ function FreeCloudAccount({ provider, refreshing, onRefresh }: { provider?: Prov
       <div className="settings-provider-setting-row settings-provider-auth-row">
         <span className="settings-search-field-label">Account</span>
         <span className="settings-provider-setting-value" title={auth.state.status === "signed-in" ? auth.state.user.email : undefined}>{auth.state.status === "signed-in" ? auth.state.user.email ?? auth.state.user.name : "OhMyGame account"}</span>
-        {needsSignIn ? <button type="button" className="settings-secondary-button" onClick={auth.openSignIn}>Sign in</button> : null}
+        {needsSignIn ? <button type="button" className="settings-add-button" onClick={auth.openSignIn}>Sign in</button> : null}
       </div>
     </div>
     <section className="settings-detail-section provider-models" aria-label="Daily quota">
       <div className="provider-models-heading">
         <h4>Daily quota</h4>
-        {userId ? <button type="button" className="settings-secondary-button" disabled={refreshing} onClick={onRefresh} aria-label="Refresh quota"><RefreshCw size={13} className={refreshing ? "spin" : undefined} /><span>Refresh</span></button> : null}
+        {userId ? <button type="button" className="icon-button settings-provider-setting-edit" disabled={refreshing} onClick={onRefresh} aria-label="Refresh quota" data-tooltip="Refresh quota"><RefreshCw size={15} className={refreshing ? "spin" : undefined} aria-hidden="true" /></button> : null}
       </div>
       {quota ? <CloudQuotaDetails quota={quota} /> : <p className="settings-detail-hint" role="status">{needsSignIn ? "Sign in for free daily credits." : refreshing ? "Checking your daily allowance…" : cloudQuotaSummary(cloud)}</p>}
       {quota && cloud?.availability !== "ready" ? <p className="settings-detail-hint" role="status">{cloud?.availability === "personal_exhausted" ? "Your daily quota is used up. More becomes available after the reset." : cloudQuotaSummary(cloud)}</p> : null}
@@ -539,6 +542,14 @@ function CustomProviderDetail({ provider, onBack, onRemoved }: { provider: Provi
     { field: "baseUrl", label: "Base URL", value: settings.baseUrl },
     { field: "api", label: "API", value: PROVIDER_API_LABELS[settings.api] ?? settings.api },
   ] : [];
+  // Models may override the provider URL; show one balance per distinct compatible connection.
+  const balanceConnections = new Map<string, CustomProviderModel>();
+  for (const model of settings?.models ?? []) {
+    const config = model.usages?.["3d"];
+    if (!config) continue;
+    const connection = JSON.stringify([config.protocol, (config.baseUrl ?? settings!.baseUrl).replace(/\/+$/, "")]);
+    if (!balanceConnections.has(connection)) balanceConnections.set(connection, model);
+  }
   return <section className="settings-panel settings-provider-detail">
     <ProviderDetailHeader provider={{ ...provider, name: settings?.name ?? provider.name }} onBack={onBack}>
       <ProviderDeleteButton deletion={deletion} disabled={openingEditor || Boolean(editing)} />
@@ -553,6 +564,7 @@ function CustomProviderDetail({ provider, onBack, onRemoved }: { provider: Provi
       </div>)}
     </div> : !error ? <div className="settings-loading"><LoaderCircle className="spin" size={16} />Loading configuration</div> : null}
     {error || deletion.error ? <p className="settings-error" role="alert">{deletion.error ?? error}</p> : null}
+    {provider.configured ? [...balanceConnections].map(([connection, model]) => <Provider3DBalance key={connection} model={{ provider: provider.id, id: model.id }} label={balanceConnections.size > 1 ? `API balance · ${model.name}` : undefined} />) : null}
     {settings ? <ProviderModels key={modelsRevision} providerId={provider.id} onEditModels={() => void openEditor("models")} /> : null}
     {editing && settings ? <CustomProviderDialog settings={settings} initialFocus={editing} onClose={() => setEditing(undefined)} onSaved={(value) => { setSettings(value); setEditing(undefined); setModelsRevision((revision) => revision + 1); }} /> : null}
   </section>;
@@ -602,6 +614,7 @@ function Native3DProviderKeyForm({ provider, onCompleted }: { provider: Provider
       </div>
     </form>
     {provider.id === "hyper3d" ? <p className="settings-detail-hint">API key models use your Hyper3D balance. Free account models remain available.</p> : null}
+    {provider.configured ? <Provider3DBalance model={{ provider: provider.id, id: MODEL3D_CONNECTION_ID }} /> : null}
     {error || deletion.error ? <p className="settings-error" role="alert">{deletion.error ?? error}</p> : null}
   </>;
 }
