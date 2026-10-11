@@ -18,6 +18,7 @@ import { DesktopUpdater } from "./updater.js";
 import { ElectronPlaytestDriver } from "./playtest-driver.js";
 import { WebGamePlayerWindows, type WebGamePlayerTarget } from "./web-game-player.js";
 import { RendererCloseRequest } from "./renderer-close.js";
+import { AsyncTaskPool } from "./async-task-pool.js";
 import { PROJECT_FILE_OPEN_MODES, type ProjectFileOpenMode } from "../shared/contracts.js";
 import type { PlaytestWatchState } from "../shared/playtest.js";
 import type { WebGamePlayerRequest } from "../shared/web-game-player.js";
@@ -32,9 +33,10 @@ let mainWindow: BrowserWindow | undefined;
 const playtestWindows = new Map<string, BrowserWindow | Promise<BrowserWindow>>();
 /** A Node that fails to start never reports back; its window gives up after this. */
 const NODE_THUMBNAIL_TIMEOUT_MS = 20_000;
+const nodeThumbnailCaptures = new AsyncTaskPool(2);
+const nodeThumbnailBatches = new Map<string, { projectId: string; controller: AbortController; requests: number }>();
 /** Hidden Node thumbnail windows by WebContents ID. */
 const nodeThumbnails = new Map<number, { window: BrowserWindow; finish: (captured: boolean) => void }>();
-let nodeThumbnailQueue: Promise<unknown> = Promise.resolve();
 /** Thumbnail windows run Node code, so they may only capture and report. */
 const NODE_THUMBNAIL_CHANNELS = new Set(["ohmygame:capture-page", "ohmygame:finish-node-thumbnail"]);
 
@@ -219,13 +221,14 @@ handle("ohmygame:capture-page", async (event, rectangle: unknown) => {
   const bounds = captureBounds(rectangle, window.getContentBounds());
   return window.webContents.capturePage(bounds).then((image) => image.toPNG());
 });
-handle("ohmygame:capture-node-thumbnail", (event, projectId: unknown, nodeId: unknown, viewport: unknown) => {
+handle("ohmygame:capture-node-thumbnail", (event, projectId: unknown, nodeId: unknown, viewport: unknown, batchId: unknown) => {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Invalid thumbnail source");
-  if (!validRouteId(projectId) || !validRouteId(nodeId) || !isValidPlaytestViewport(viewport)) throw new Error("Invalid thumbnail target");
-  // One hidden window at a time keeps background captures cheap.
-  const capture = nodeThumbnailQueue.then(() => captureNodeThumbnail(projectId, nodeId, viewport));
-  nodeThumbnailQueue = capture.catch(() => {});
-  return capture;
+  if (!validRouteId(projectId) || !validRouteId(nodeId) || !isValidPlaytestViewport(viewport) || !validRouteId(batchId)) throw new Error("Invalid thumbnail target");
+  return scheduleNodeThumbnail(projectId, nodeId, viewport, batchId);
+});
+handle("ohmygame:cancel-node-thumbnails", (event, batchId: unknown) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || !validRouteId(batchId)) throw new Error("Invalid thumbnail cancellation");
+  nodeThumbnailBatches.get(batchId)?.controller.abort();
 });
 handle("ohmygame:finish-node-thumbnail", (event, captured: unknown) => {
   nodeThumbnails.get(event.sender.id)?.finish(captured === true);
@@ -487,6 +490,7 @@ async function openMainWindow(): Promise<void> {
           void Promise.resolve(playtest).then((window) => window.close(), () => {});
         }
         playtestWindows.clear();
+        for (const batch of nodeThumbnailBatches.values()) batch.controller.abort();
         for (const thumbnail of nodeThumbnails.values()) thumbnail.finish(false);
       });
     },
@@ -532,14 +536,31 @@ function captureBounds(value: unknown, content: Electron.Rectangle): Electron.Re
   return bounds;
 }
 
+async function scheduleNodeThumbnail(projectId: string, nodeId: string, viewport: { width: number; height: number }, batchId: string): Promise<boolean> {
+  let batch = nodeThumbnailBatches.get(batchId);
+  if (!batch) {
+    batch = { projectId, controller: new AbortController(), requests: 0 };
+    nodeThumbnailBatches.set(batchId, batch);
+  } else if (batch.projectId !== projectId) throw new Error("Invalid thumbnail batch");
+  batch.requests += 1;
+  return nodeThumbnailCaptures.run(
+    () => captureNodeThumbnail(projectId, nodeId, viewport, batch.controller.signal), batch.controller.signal,
+  ).catch(() => false).finally(() => {
+    batch.requests -= 1;
+    if (!batch.requests) nodeThumbnailBatches.delete(batchId);
+  });
+}
+
 /**
  * Runs one Node in a hidden window. The page stores its own screenshot, with
  * the hash of what it ran, and then reports whether that worked.
  */
-async function captureNodeThumbnail(projectId: string, nodeId: string, viewport: { width: number; height: number }): Promise<boolean> {
-  if (!daemon || !mainWindow) return false;
+async function captureNodeThumbnail(projectId: string, nodeId: string, viewport: { width: number; height: number }, signal: AbortSignal): Promise<boolean> {
+  if (!daemon || !mainWindow || signal.aborted) return false;
   let finish!: (captured: boolean) => void;
   const finished = new Promise<boolean>((resolve) => { finish = resolve; });
+  const cancel = () => finish(false);
+  signal.addEventListener("abort", cancel, { once: true });
   const timer = setTimeout(() => finish(false), NODE_THUMBNAIL_TIMEOUT_MS);
   let thumbnailWindow: BrowserWindow | undefined;
   try {
@@ -565,6 +586,7 @@ async function captureNodeThumbnail(projectId: string, nodeId: string, viewport:
   } catch {
     return false;
   } finally {
+    signal.removeEventListener("abort", cancel);
     clearTimeout(timer);
     if (thumbnailWindow && !thumbnailWindow.isDestroyed()) thumbnailWindow.destroy();
   }

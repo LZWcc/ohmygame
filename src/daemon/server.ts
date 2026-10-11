@@ -28,11 +28,20 @@ const playtestDriver = process.env.OHMYGAME_PLAYTEST_IPC === "1" && process.conn
 const shutdown = async () => {
   if (shuttingDown) return;
   shuttingDown = true;
-  await app?.close();
-  process.exit(0);
+  try {
+    await app?.close();
+    process.exit(0);
+  } catch (error) {
+    console.error("Could not close the daemon cleanly", error);
+    process.exit(1);
+  }
 };
 process.once("SIGINT", shutdown);
 process.once("SIGTERM", shutdown);
+process.on("message", (value: unknown) => {
+  if ((value as { channel?: string } | null)?.channel === "ohmygame:shutdown")
+    void shutdown();
+});
 
 try {
   const networkSettings = new NetworkSettingsService(dataDirectory, {

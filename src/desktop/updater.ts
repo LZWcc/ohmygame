@@ -7,6 +7,7 @@ const { autoUpdater } = electronUpdater;
 export class DesktopUpdater {
   #state: DesktopUpdateState;
   #listeners = new Set<(state: DesktopUpdateState) => void>();
+  #installing = false;
 
   constructor(currentVersion: string, private readonly onInstall: () => Promise<void> | void) {
     this.#state = { currentVersion, status: { type: "idle" } };
@@ -23,7 +24,10 @@ export class DesktopUpdater {
       this.#set({ type: "downloading", version: current.version, percent: Math.max(0, Math.min(100, Math.round(progress.percent))) });
     });
     autoUpdater.on("update-downloaded", (info) => this.#set({ type: "ready", version: info.version }));
-    autoUpdater.on("error", (error) => this.#set({ type: "error", message: error instanceof Error ? error.message : String(error) }));
+    autoUpdater.on("error", (error) => {
+      this.#installing = false;
+      this.#setError(error);
+    });
   }
 
   state(): DesktopUpdateState {
@@ -58,11 +62,13 @@ export class DesktopUpdater {
   }
 
   async install(): Promise<void> {
-    if (this.#state.status.type !== "ready") return;
+    if (this.#state.status.type !== "ready" || this.#installing) return;
+    this.#installing = true;
     try {
       await this.onInstall();
       autoUpdater.quitAndInstall(false, true);
     } catch {
+      this.#installing = false;
       // The renderer explains why closing was cancelled. Keep the download ready to retry.
     }
   }

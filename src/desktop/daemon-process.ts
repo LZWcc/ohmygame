@@ -7,6 +7,7 @@ import type { DaemonRuntime } from "../shared/desktop-runtime.js";
 export type { DaemonRuntime } from "../shared/desktop-runtime.js";
 
 const MAX_STARTUP_OUTPUT_CHARS = 8_000;
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 20_000;
 
 export interface ManagedDaemon {
   runtime: DaemonRuntime;
@@ -133,14 +134,17 @@ export async function startDaemon(options: StartDaemonOptions): Promise<ManagedD
     throw error;
   }
 
+  let stopping: Promise<void> | undefined;
   return {
     runtime,
-    async stop() {
-      if (stopped) return;
+    stop() {
+      if (stopping) return stopping;
       stopped = true;
-      playtestRequests?.close();
-      await stopChild(child);
-      await closed;
+      return stopping = (async () => {
+        playtestRequests?.close();
+        await stopChild(child);
+        await closed;
+      })();
     },
   };
 }
@@ -234,20 +238,24 @@ function startupError(message: string, output: string): Error {
 async function stopChild(child: ChildProcess): Promise<void> {
   if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  child.kill("SIGTERM");
-  const forced = await exitWithin(exited, 5_000);
-  if (forced && child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-    if (await exitWithin(exited, 1_000)) throw new Error("The background service could not be stopped.");
+  // IPC lets Windows close the daemon's services before taskkill. POSIX also
+  // supports older daemons through SIGTERM; both paths share the shutdown gate.
+  if (child.connected) child.send({ channel: "ohmygame:shutdown" }, () => {});
+  if (process.platform !== "win32") child.kill("SIGTERM");
+  if (await exitsWithin(exited, GRACEFUL_SHUTDOWN_TIMEOUT_MS)) return;
+  if (process.platform === "win32") await signalProcessTree(child.pid, true);
+  else child.kill("SIGKILL");
+  if (!(await exitsWithin(exited, 5_000))) {
+    throw new Error("The background service could not be stopped.");
   }
 }
 
-async function exitWithin(exited: Promise<void>, milliseconds: number): Promise<boolean> {
+async function exitsWithin(exited: Promise<void>, milliseconds: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
-      exited.then(() => false),
-      new Promise<true>((resolve) => { timer = setTimeout(() => resolve(true), milliseconds); }),
+      exited.then(() => true),
+      new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), milliseconds); }),
     ]);
   } finally { clearTimeout(timer); }
 }

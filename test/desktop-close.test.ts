@@ -6,7 +6,8 @@ const host = vi.hoisted(() => ({
   ipcEvents: new Map<string, (...args: any[]) => void>(),
   handlers: new Map<string, (...args: any[]) => any>(),
   windowEvents: new Map<string, (...args: any[]) => void>(),
-  sender: { send: vi.fn() },
+  sender: { id: 1, send: vi.fn() },
+  thumbnails: [] as Array<{ webContents: { id: number }; destroy: ReturnType<typeof vi.fn> }>,
   stopped: vi.fn(async () => {}),
   quit: vi.fn(), relaunch: vi.fn(), close: vi.fn(),
   install: undefined as (() => Promise<void>) | undefined,
@@ -45,8 +46,20 @@ vi.doMock(path.resolve("src/desktop/updater.ts"), () => ({ DesktopUpdater: class
   subscribe() {} check() {}
 } }));
 vi.doMock(path.resolve("src/desktop/window.ts"), () => ({
-  createDesktopWindow: async (options: { beforeLoad(window: unknown): void }) => {
+  createDesktopWindow: async (options: { hidden?: boolean; beforeLoad(window: unknown): void }) => {
     host.options = options as unknown as Record<string, unknown>;
+    if (options.hidden) {
+      let destroyed = false;
+      const events = new Map<string, () => void>();
+      const window = {
+        webContents: { id: host.thumbnails.length + 2 }, isDestroyed: () => destroyed,
+        once: (name: string, listener: () => void) => events.set(name, listener),
+        destroy: vi.fn(() => { destroyed = true; events.get("closed")?.(); }),
+      };
+      host.thumbnails.push(window);
+      options.beforeLoad(window);
+      return window;
+    }
     const window = {
       webContents: host.sender, isDestroyed: () => false, close: host.close,
       on: (name: string, fn: (...args: any[]) => void) => host.windowEvents.set(name, fn),
@@ -55,12 +68,13 @@ vi.doMock(path.resolve("src/desktop/window.ts"), () => ({
     options.beforeLoad(window);
     return window;
   },
-  waitForRenderer: async () => {}, fitPlaytestContentSize: vi.fn(), isValidPlaytestViewport: vi.fn(), windowsTitleBarOverlay: vi.fn(),
+  waitForRenderer: async () => {}, fitPlaytestContentSize: vi.fn(), isValidPlaytestViewport: () => true, windowsTitleBarOverlay: vi.fn(),
 }));
 
 beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); vi.useFakeTimers();
   host.appEvents.clear(); host.ipcEvents.clear(); host.handlers.clear(); host.windowEvents.clear();
+  host.thumbnails.length = 0;
   process.argv.push("--built-renderer");
   host.quit.mockImplementation(() => host.appEvents.get("before-quit")!({ preventDefault() {} }));
   await import("../src/desktop/main.js");
@@ -108,7 +122,7 @@ it("cancels a failed Quit and permits a later retry", async () => {
   expect(host.stopped).toHaveBeenCalledOnce();
 });
 it("rejects foreign and stale acknowledgements and resumes after a timeout", async () => {
-  quit(); acknowledge(undefined, { send: vi.fn() }); acknowledge(undefined, host.sender, 0);
+  quit(); acknowledge(undefined, { id: 99, send: vi.fn() }); acknowledge(undefined, host.sender, 0);
   await vi.advanceTimersByTimeAsync(30_000);
   expect(host.stopped).not.toHaveBeenCalled();
   expect(host.sender.send).toHaveBeenLastCalledWith("ohmygame:cancel-close", 1, expect.stringContaining("too long"));
@@ -132,4 +146,19 @@ it("requires the same save acknowledgement before installing an update", async (
   expect(host.stopped).not.toHaveBeenCalled();
   acknowledge(); await installing;
   expect(host.stopped).toHaveBeenCalledOnce();
+});
+
+it("cancels active and queued thumbnail captures and frees slots for the next batch", async () => {
+  const capture = (id: string, batch: string) => host.handlers.get("ohmygame:capture-node-thumbnail")!(
+    { sender: host.sender }, "p", id, { width: 1280, height: 720 }, batch,
+  ) as Promise<boolean>;
+  const previous = [capture("a", "old"), capture("b", "old"), capture("c", "old")];
+  expect(host.thumbnails).toHaveLength(2);
+  host.handlers.get("ohmygame:cancel-node-thumbnails")!({ sender: host.sender }, "old");
+  await expect(Promise.all(previous)).resolves.toEqual([false, false, false]);
+  expect(host.thumbnails.every(window => window.destroy.mock.calls.length === 1)).toBe(true);
+  const next = capture("next", "new");
+  expect(host.thumbnails).toHaveLength(3);
+  host.handlers.get("ohmygame:finish-node-thumbnail")!({ sender: host.thumbnails[2]!.webContents }, true);
+  await expect(next).resolves.toBe(true);
 });

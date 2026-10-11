@@ -123,7 +123,9 @@ declare global {
       };
       capturePage: (bounds: { x: number; y: number; width: number; height: number }) => Promise<Uint8Array>;
       /** Captures a Node's thumbnail in a hidden window; `false` when it could not. */
-      captureNodeThumbnail?: (projectId: string, nodeId: string, viewport: { width: number; height: number }) => Promise<boolean>;
+      captureNodeThumbnail?: (projectId: string, nodeId: string, viewport: { width: number; height: number }, batchId: string) => Promise<boolean>;
+      /** Cancels active and queued captures in a batch. */
+      cancelNodeThumbnails?: (batchId: string) => Promise<void>;
       /** Called by the hidden thumbnail window once its capture is stored or failed. */
       finishNodeThumbnail?: (captured: boolean) => Promise<void>;
       openPlaytest: (projectId: string, viewport: { width: number; height: number }) => Promise<void>;

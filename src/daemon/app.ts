@@ -90,7 +90,7 @@ import {
   createPlayableStarterCodebase,
   NodeCodebaseConflictError,
   NodeCodebaseError,
-  readNodeCodebaseDetail,
+  openNodeCodebaseDetail,
   writeNodeCodebase,
 } from "./playable-codebase.js";
 import type { NodeCodebaseUpdate } from "../shared/playable-codebase.js";
@@ -1130,7 +1130,7 @@ export function createApp(options: AppOptions = {}) {
     if (!project) return reply.code(404).send({ error: "Project not found" });
     if (project.type !== "interactive-story") return reply.code(409).send({ error: "Playable codebases require an Interactive Story project" });
     try {
-      return await readNodeCodebaseDetail(project.workspacePath);
+      return await openNodeCodebaseDetail(project.workspacePath);
     } catch (cause) {
       return reply.code(400).send({ error: cause instanceof Error ? cause.message : String(cause) });
     }
