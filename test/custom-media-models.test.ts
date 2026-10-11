@@ -1,3 +1,4 @@
+import { TEST_GLB } from "./model3d-fixture.js";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -118,7 +119,7 @@ describe("unified custom media models", () => {
   });
 
   it.each(["image-to-3d", "multi-image-to-3d"] as const)("runs a custom Meshy alias through %s with its configured polycount", async (operation) => {
-    const request = vi.fn<typeof fetch>(async (url, init) => String(url) === "https://files.test/model.glb" ? new Response(Buffer.from("glb"))
+    const request = vi.fn<typeof fetch>(async (url, init) => String(url) === "https://files.test/model.glb" ? new Response(new Uint8Array(TEST_GLB))
       : init?.method === "POST" ? Response.json({ result: "mesh-job" }) : Response.json({ status: "SUCCEEDED", model_urls: { glb: "https://files.test/model.glb" } }));
     const { app, save } = await fixture(request);
     const config = { ...defaultModel3DSettings(), operation, maxReferenceImages: operation === "multi-image-to-3d" ? 4 : 1, baseUrl: "https://meshes.test/openapi/v1" };
@@ -130,7 +131,8 @@ describe("unified custom media models", () => {
 
   it.each(["image", "video", "3d"] as const)("resolves %s node overrides, project defaults and global inheritance without switching unavailable selections", async (usage) => {
     const request = vi.fn<typeof fetch>(async (url, init) => {
-      if (String(url) === "https://files.test/output.mp4" || String(url) === "https://files.test/model.glb") return new Response(Buffer.from("generated"));
+      if (String(url) === "https://files.test/model.glb") return new Response(new Uint8Array(TEST_GLB));
+      if (String(url) === "https://files.test/output.mp4") return new Response(Buffer.from("generated"));
       if (String(url).endsWith("/images/generations")) return Response.json({ data: [{ b64_json: Buffer.from("image").toString("base64") }] });
       if (init?.method === "POST") return Response.json({ id: "job", result: "job" });
       return Response.json({ status: "completed", model_urls: { glb: "https://files.test/model.glb" }, unsigned_urls: ["https://files.test/output.mp4"] });
@@ -233,4 +235,21 @@ describe("unified custom media models", () => {
     expect(migrated.models[0]).toMatchObject({ id: modelId, name: "My existing model", usages: { language: true, image: { protocol: "gemini-generate-content" } } });
     expect(runtime.getModels(id).map((model) => model.id)).toEqual([modelId]);
   });
+});
+
+it("uses an opted-in hidden custom Meshy connection for animations without forcing a key", async () => {
+  const request = vi.fn<typeof fetch>(async (url) => String(url).endsWith("/animations/library") ? Response.json([{ action_id: 0, name: "Idle" }]) : Response.json({ data: [] }));
+  const { app, save } = await fixture(request);
+  const base = { ...defaultModel3DSettings(), baseUrl: "http://relay.test/openapi/v1" };
+  const disabled = await save([model("geometry-only", { "3d": base })], { authentication: "none", apiKey: undefined });
+  const rejected = await app.inject(`/model3d-animations?provider=${disabled.id}&id=geometry-only`);
+  expect(rejected.statusCode).toBe(503);
+  const enabled = await save([model("geometry", { "3d": { ...base, operations: ["animate", "retexture"] } })], { name: "Animation studio", authentication: "none", apiKey: undefined, hiddenModelIds: ["geometry"] });
+  expect((await app.inject("/model3d-models/catalog")).json().models.some((model: { provider: string }) => model.provider === enabled.id)).toBe(false);
+  expect((await app.inject("/model3d-operations")).json()).toContainEqual(expect.objectContaining({ provider: enabled.id, operations: expect.arrayContaining(["animate", "retexture"]) }));
+  const response = await app.inject(`/model3d-animations?provider=${enabled.id}&id=geometry`);
+  expect(response.statusCode, response.body).toBe(200); expect(response.json()).toMatchObject([{ id: 0, name: "Idle" }]);
+  const call = request.mock.calls.find(([url]) => String(url).endsWith("/animations/library"))!;
+  expect(call[0]).toBe("http://relay.test/openapi/v1/animations/library");
+  expect(new Headers(call[1]?.headers).has("authorization")).toBe(false);
 });

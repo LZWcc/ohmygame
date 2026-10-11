@@ -34,12 +34,12 @@ function remapReferences(node: AssetCanvasNode, ids: ReadonlyMap<string, string>
       Object.entries(node.data.referenceMentions).map(([alias, value]) => [alias, reference(value)[0] ?? value]),
     );
   }
-  if ((node.type === "image" || node.type === "video") && node.data.promptSource) {
+  if ((node.type === "image" || node.type === "video" || node.type === "model-3d") && node.data.promptSource) {
     const id = ids.get(node.data.promptSource.nodeId);
     if (id) node.data.promptSource = { type: "node", nodeId: id };
     else delete node.data.promptSource;
   }
-  if (node.type === "animate-3d" && node.data.source) {
+  if ((node.type === "animate-3d" || node.type === "model-3d") && node.data.source) {
     const source = reference(node.data.source)[0];
     if (source) node.data.source = source;
     else delete node.data.source;

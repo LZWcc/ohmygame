@@ -48,6 +48,7 @@ vi.doMock(path.resolve("src/renderer/api.ts"), async (original) => ({
   listImageModelCatalog: async () => ({ models: [], providers: [] }),
   listVideoModelCatalog: async () => ({ models: [], providers: [] }),
   listModel3DCatalog: async () => ({ models: [], providers: [] }),
+  listModel3DOperations: async () => [],
 }));
 vi.doMock(path.resolve("src/renderer/library-assets.ts"), async (original) => ({
   ...(await original<typeof import("../src/renderer/library-assets.js")>()),
