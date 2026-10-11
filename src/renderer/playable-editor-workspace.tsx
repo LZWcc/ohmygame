@@ -26,6 +26,7 @@ import {
   type Edge,
   type EdgeChange,
   type NodeChange,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import { snapCanvasPosition } from "./canvas-alignment.js";
 import { EditorCanvas, isTextEntry, undoShortcut, type CanvasContextMenuState } from "./editor-canvas.js";
@@ -164,6 +165,7 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
   const [playtesting, setPlaytesting] = useState(false);
   const [writing, setWriting] = useState(false);
   const latestCodebase = useRef<NodeCodebase | undefined>(undefined);
+  const canvas = useRef<ReactFlowInstance<PlayableFlowNode, Edge>>(null);
   /** What the editor last read from or wrote to disk, and the revision a save has to start from. */
   const diskCodebase = useRef<{ codebase: NodeCodebase; revision: string } | undefined>(undefined);
   /** Counts the versions loaded from disk, so a save queued before a load is not written over it. */
@@ -574,7 +576,10 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
 
   useDesktopSave(async () => {
     const pending = latestCodebase.current;
-    await (pending ? save(pending) : saveChain.current);
+    if (!pending) return saveChain.current;
+    // React Flow delays onMoveEnd while scrolling; read the displayed view on close.
+    const viewport = workspaceView === "canvas" && !designOpen ? canvas.current?.getViewport() : undefined;
+    await save(viewport ? { ...pending, editorLayout: { ...pending.editorLayout, viewport } } : pending);
   });
 
   useEffect(() => {
@@ -1039,6 +1044,7 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
               <EditorCanvas<PlayableFlowNode>
                 nodes={renderedNodes}
                 edges={renderedEdges}
+                onInit={(instance) => { canvas.current = instance; }}
                 nodeTypes={PLAYABLE_NODE_TYPES}
                 addControl={<PlayableAddControl
                   presets={presets}
