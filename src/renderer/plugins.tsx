@@ -1,10 +1,15 @@
+import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { AddMcpPluginDialog, PluginAssistantDialog, PluginConfigurationPanel, PluginMcpPanel } from "./plugin-controls.js";
 import {
+  Box,
   ChevronRight,
   ExternalLink,
   FolderPlus,
   FolderOpen,
+  Gamepad2,
   GitBranch,
+  Globe2,
+  Image,
   LoaderCircle,
   Package,
   Plus,
@@ -12,6 +17,7 @@ import {
   Plug,
   Search,
   WandSparkles,
+  type IconComponent,
 } from "./icons.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -35,10 +41,12 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
   onPluginChange: (pluginId?: string) => void;
   onTryPlugin: (plugin: PluginDetail, prompt: string, projectId?: string) => Promise<void>;
 }) {
+  const serviceGeneration = useReadyRuntimeGeneration();
   const [plugins, setPlugins] = useState<PluginSummary[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [detailResult, setDetailResult] = useState<{ pluginId: string; plugin?: PluginDetail; error?: string }>();
   const [detailRetry, setDetailRetry] = useState(0);
+  const detailRequest = useRef({ pluginId, retry: detailRetry });
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [catalogRetry, setCatalogRetry] = useState(0);
@@ -71,8 +79,12 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
     }
   }
 
-  useEffect(() => { void load(); }, [catalogRetry]);
+  useEffect(() => { void load(); }, [catalogRetry, serviceGeneration]);
   useEffect(() => {
+    const explicitReload = detailRequest.current.pluginId !== pluginId || detailRequest.current.retry !== detailRetry;
+    detailRequest.current = { pluginId, retry: detailRetry };
+    // A service refresh keeps an already loaded configuration and its unsaved fields.
+    if (!explicitReload && detailResult?.plugin && detailResult.pluginId === pluginId) return;
     setDetailResult(undefined);
     setError(undefined);
     if (!pluginId) return;
@@ -88,7 +100,7 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
       }
     })();
     return () => { disposed = true; };
-  }, [pluginId, detailRetry]);
+  }, [pluginId, detailRetry, serviceGeneration]);
 
   useEffect(() => {
     if (!addMenuOpen) return;
@@ -492,7 +504,7 @@ function PluginDetailView({ phase, plugin, updating, error, onRetry, onTogglePlu
         <h2>Try it</h2>
         <div>{prompts.map((prompt) => <button type="button" key={prompt} onClick={() => choosePrompt(prompt)}>
           <span className="plugin-prompt-copy">
-            <span className="plugin-prompt-reference">{plugin.id === "ohmygame:godot" ? <GodotIcon size={14} /> : <Package size={14} aria-hidden="true" />}{plugin.displayName}</span>
+            <span className="plugin-prompt-reference"><PluginGlyph plugin={plugin} size={14} />{plugin.displayName}</span>
             <span className="plugin-prompt-text">{prompt}</span>
           </span>
           <ChevronRight size={14} />
@@ -594,10 +606,22 @@ function pluginSummary(plugin: PluginDetail): PluginSummary {
   return summary;
 }
 
-function PluginIcon({ plugin, large = false }: { plugin: Pick<PluginSummary, "id" | "source">; large?: boolean }): ReactNode {
-  const size = large ? 42 : 29;
-  const godot = plugin.id === "ohmygame:godot";
-  return <span className={`plugin-row-icon plugin-row-icon-${godot ? "godot" : "media"}${large ? " plugin-row-icon-large" : ""}`}>{godot ? <GodotIcon size={size} /> : plugin.source.type !== "builtIn" ? <Package size={size} /> : <WandSparkles size={size} />}</span>;
+const includedPluginIcons: Record<string, IconComponent> = {
+  "game-studio": Gamepad2,
+  "web-game-studio": Globe2,
+  "threejs-world": Box,
+  img2threejs: Image,
+};
+
+function PluginGlyph({ plugin, size }: { plugin: Pick<PluginSummary, "id" | "name" | "source">; size: number }): ReactNode {
+  if (plugin.id === "ohmygame:godot") return <GodotIcon size={size} />;
+  const included = plugin.source.type === "builtIn" || plugin.source.type === "preinstalled";
+  const Icon = (included ? includedPluginIcons[plugin.name] : undefined) ?? Package;
+  return <Icon size={size} aria-hidden="true" />;
+}
+
+function PluginIcon({ plugin, large = false }: { plugin: Pick<PluginSummary, "id" | "name" | "source">; large?: boolean }): ReactNode {
+  return <span className={`plugin-row-icon${plugin.id === "ohmygame:godot" ? " plugin-row-icon-godot" : ""}${large ? " plugin-row-icon-large" : ""}`}><PluginGlyph plugin={plugin} size={large ? 42 : 29} /></span>;
 }
 
 function pluginSearchText(plugin: PluginSummary): string {

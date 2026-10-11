@@ -1,6 +1,6 @@
 {
   "name": "ohmygame",
-  "version": "0.0.0-beta.4.3",
+  "version": "0.0.0-beta.4.4",
   "description": "An open-source local-first agent for creating and publishing games.",
   "author": "WhiteTowerAI",
   "license": "Apache-2.0",
@@ -42,6 +42,7 @@
     "test:node-runtime": "bun run build:daemon && node scripts/test-node-runtime.mjs"
   },
   "dependencies": {
+    "@earendil-works/pi-ai": "0.99.2",
     "@earendil-works/pi-coding-agent": "0.99.2",
     "@gltf-transform/core": "4.5.1",
     "@gltf-transform/extensions": "4.5.1",

@@ -71,6 +71,13 @@ installation. The `beforePack` hook bundles its public runtime entry points
 into `.runtime/typebox`, which replaces the original ESM files in the packaged
 app while preserving TypeBox's package metadata and declarations.
 
+Pi AI is a direct, pinned runtime dependency because the daemon imports its
+patched diagnostic helper. The `afterPack` hook checks that the packaged helper
+and adapters match the installed patch, then starts the packaged daemon with
+temporary data and verifies its authenticated API on native platform builds.
+An incomplete or unpatched dependency therefore fails packaging before an
+installer is created.
+
 ## Rollback
 
 Do not overwrite versioned installers. To roll back a bad release, restore the

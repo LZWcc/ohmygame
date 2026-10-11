@@ -1,3 +1,4 @@
+import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { Box, Film, Image, LoaderCircle, Plus, RefreshCw, type IconComponent } from "./icons.js";
 import { useEffect, useRef, useState } from "react";
 import type { ProjectState } from "../shared/contracts.js";
@@ -22,6 +23,7 @@ export function AssetCanvasHome({ onNavigate, onOpenProject }: {
   onNavigate: (page: AppNavigationTarget) => void;
   onOpenProject: (projectId: string, initialNodeId?: string) => void;
 }) {
+  const serviceGeneration = useReadyRuntimeGeneration();
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string>();
@@ -45,7 +47,7 @@ export function AssetCanvasHome({ onNavigate, onOpenProject }: {
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [serviceGeneration]);
 
   // Picks up providers connected since the last visit, so a starter click rarely waits.
   useEffect(() => { void loadQuickStartModels(); }, []);

@@ -2,6 +2,7 @@ import { createClient, type User } from "@supabase/supabase-js";
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { SignInDialog, type SignInProvider } from "./sign-in-dialog.js";
 import { syncCloudSession } from "./api.js";
+import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { isLocalDebugEnabled, isLoopbackHostname, LOCAL_DEBUG_ACCESS_TOKEN, LOCAL_DEBUG_USER } from "../shared/local-debug.js";
 
 export type AuthState =
@@ -37,6 +38,7 @@ interface AuthClient {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const serviceGeneration = useReadyRuntimeGeneration();
   const [state, setState] = useState<AuthState>(() => {
     if (supabase) return { status: "loading" };
     try {
@@ -91,7 +93,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearInterval(timer);
       data.subscription.unsubscribe();
     };
-  }, []);
+  }, [serviceGeneration]);
 
   useEffect(() => {
     const desktopAuth = window.ohMyGameDesktop?.auth;

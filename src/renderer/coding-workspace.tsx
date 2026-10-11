@@ -1,3 +1,4 @@
+import { previewPageUrl as isolatedPreviewUrl } from "../shared/preview-page.js";
 import {
   Check,
   Copy,
@@ -37,7 +38,7 @@ import { createPortal } from "react-dom";
 import { Tree, type NodeRendererProps, type TreeApi } from "react-arborist";
 import type { PreviewViewport, ProjectFileOpenMode, ProjectState, WorkspaceFile, WorkspaceFileContent } from "../shared/contracts.js";
 import type { PlaytestWatchState } from "../shared/playtest.js";
-import { supportsWebPreview, webPreviewSettingsChanged } from "../shared/project-runtime.js";
+import { isWebRuntimeProjectType, supportsWebPreview } from "../shared/project-runtime.js";
 import { createWorkspaceEntry, deleteWorkspaceEntry, getProjectCover, getProjectCoverState, getWorkspaceFile, listWorkspaceFiles, renameWorkspaceEntry, saveProjectAssetToLibrary, setProjectCover } from "./api.js";
 import { captureElementImage } from "./page-capture.js";
 import { AssetToolbar, WorkspaceAssetCard, WorkspaceAssetDialog, fileName, filterAssets, hasMediaType, type MediaFilter, type ProjectAssetFilters } from "./asset-browser.js";
@@ -50,6 +51,8 @@ import { AssetMedia } from "./asset-gallery.js";
 import { useWorkspaceAssetUrl } from "./use-workspace-asset-url.js";
 import { WorkspaceTabs, type WorkspaceTabOption } from "./workspace-tabs.js";
 import { useWebGamePlayer } from "./use-web-game-player.js";
+import { ErrorBoundary } from "./error-boundary.js";
+import { useRuntimeConnection } from "./runtime-connection.js";
 
 type WorkspaceTab = "preview" | "code" | "assets";
 const CanvasWorkspace = lazy(() => import("./canvas-workspace.js").then((module) => ({ default: module.CanvasWorkspace })));
@@ -67,11 +70,14 @@ interface CodingWorkspaceProps {
   agentBusy: boolean;
   publishing: boolean;
   workspaceRevision: number;
+  previewPaused?: boolean;
   onPublish: (details: PublishDetails) => Promise<boolean>;
   publishDialog?: "open" | "success";
   onOpenPublish: () => void;
   onClosePublish: () => void;
-  onRestart: (project?: ProjectState) => void;
+  onRestart: (project?: ProjectState, reinstall?: boolean) => void;
+  onStop?: () => Promise<void>;
+  onAskAgent?: (text: string) => void;
   designOpen?: boolean;
   onDesignOpenChange?: (open: boolean) => void;
   onDesignSaveReady?: (save: (() => Promise<void>) | undefined) => void;
@@ -90,11 +96,14 @@ export function CodingWorkspace({
   agentBusy,
   publishing,
   workspaceRevision,
+  previewPaused = false,
   onPublish,
   publishDialog,
   onOpenPublish,
   onClosePublish,
   onRestart,
+  onStop,
+  onAskAgent,
   designOpen = false,
   onDesignOpenChange,
   onDesignSaveReady,
@@ -120,6 +129,9 @@ export function CodingWorkspace({
   const registerDesignLeave = useCallback((leave: ((action: () => void) => void) | undefined) => { designLeave.current = leave; }, []);
   const [viewport, setViewport] = useState<PreviewViewport>(project?.previewViewport ?? "fit");
   const [previewPath, setPreviewPath] = useState(project?.previewPath ?? "/");
+  const [previewClient] = useState(() => crypto.randomUUID());
+  const [actualPreviewPath, setActualPreviewPath] = useState(project?.previewPath ?? "/");
+  const [logsOpen, setLogsOpen] = useState(false);
   const [knownPaths, setKnownPaths] = useState<string[]>(["/"]);
   const [files, setFiles] = useState<WorkspaceFile[]>([]);
   const [selectedCodePath, setSelectedCodePath] = useState<string>();
@@ -136,13 +148,34 @@ export function CodingWorkspace({
   const fileRequest = useRef(0);
   const preview = project?.preview;
   const previewBaseUrl = preview?.status === "ready" ? preview.url : undefined;
-  const previewPageUrl = previewBaseUrl ? new URL(previewPath, previewBaseUrl).toString() : undefined;
-  const player = useWebGamePlayer(supportsPreview ? project?.id : undefined, previewBaseUrl);
+  const previewPageUrl = previewBaseUrl ? isolatedPreviewUrl(new URL(previewPath, previewBaseUrl).toString(), "editor", previewClient) : undefined;
+  const currentPreviewUrl = previewBaseUrl ? isolatedPreviewUrl(new URL(actualPreviewPath, previewBaseUrl).toString(), "editor", previewClient) : undefined;
+  const player = useWebGamePlayer(supportsPreview ? project?.id : undefined, previewBaseUrl, preview?.revision, preview?.pages?.find((page) => page.source === "player")?.path);
   const previewStage = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const page = preview?.pages?.find((page) => player.open ? page.source === "player" : page.client === previewClient);
+    if (!page) return;
+    setActualPreviewPath(page.path);
+    setKnownPaths((current) => current.includes(page.path) ? current : [...current, page.path]);
+  }, [preview?.pages, previewClient, player.open]);
+
+  useEffect(() => {
     setPreviewPath(project?.previewPath ?? "/");
-  }, [project?.id, project?.previewPath, previewBaseUrl]);
+    setActualPreviewPath(project?.previewPath ?? "/");
+  }, [project?.id, project?.previewPath]);
+
+  useEffect(() => {
+    if (preview?.status !== "ready") setPreviewPath(actualPreviewPath);
+  }, [preview?.status]);
+  const previousPlayerOpen = useRef(false);
+  useEffect(() => {
+    if (previousPlayerOpen.current && !player.open) {
+      const page = preview?.pages?.find((page) => page.source === "player");
+      if (page) { setPreviewPath(page.path); setActualPreviewPath(page.path); }
+    }
+    previousPlayerOpen.current = player.open;
+  }, [player.open]);
 
   useEffect(() => {
     setViewport(project?.previewViewport ?? "fit");
@@ -227,13 +260,14 @@ export function CodingWorkspace({
     if (!previewBaseUrl) return;
     const nextPath = normalizePreviewPath(path);
     setPreviewPath(nextPath);
+    setActualPreviewPath(nextPath);
     setKnownPaths((current) => current.includes(nextPath) ? current : [...current, nextPath]);
   }
 
   function refreshPreview(): void {
     if (preview?.status === "ready") {
       if (player.open) void player.reload();
-      else setReload((value) => value + 1);
+      else { setPreviewPath(actualPreviewPath); setReload((value) => value + 1); }
     } else if (preview?.status === "error" || preview?.status === "stopped") {
       onRestart();
     }
@@ -241,7 +275,7 @@ export function CodingWorkspace({
 
   function playGame(): void {
     const bounds = previewStage.current?.getBoundingClientRect();
-    void player.play({ path: previewPath, viewport: playerViewport(viewport, bounds) });
+    void player.play({ path: actualPreviewPath, viewport: playerViewport(viewport, bounds) });
   }
 
   async function toggleAgentPlaytestWatch(): Promise<void> {
@@ -283,14 +317,19 @@ export function CodingWorkspace({
         <div className="viewer-controls-slot">
           {supportsPreview && shownTab === "preview" ? (
             <PreviewControls
-              path={previewPath}
+              path={actualPreviewPath}
               paths={knownPaths}
-              previewUrl={previewPageUrl}
+              previewUrl={currentPreviewUrl}
               refreshDisabled={!project || preview?.status === "waiting" || preview?.status === "starting"}
               refreshLabel={preview?.status === "ready" ? "Reload preview" : "Restart preview"}
               viewport={viewport}
               agentPlaytestWatch={agentPlaytestWatch}
               agentPlaytestWatchPending={agentPlaytestWatchPending}
+              project={project}
+              onStop={onStop ? () => { void player.close().catch(() => {}).then(onStop); } : undefined}
+              onRestart={() => onRestart()}
+              onReinstall={() => onRestart(undefined, true)}
+              onLogs={() => setLogsOpen((value) => !value)}
               onOpenSettings={() => setProjectSettingsOpen(true)}
               onNavigate={navigatePreview}
               onRefresh={refreshPreview}
@@ -300,14 +339,14 @@ export function CodingWorkspace({
           ) : null}
         </div>
         <div className={`viewer-publish${designOpen ? " design-header-actions" : ""}`} ref={setDesignHeaderActions}>
-          {!designOpen ? <>
-          {project?.type === "general" && shownTab !== "preview" ? <button
+          {project && isWebRuntimeProjectType(project.type) && shownTab !== "preview" ? <button
             className="icon-button pane-header-action"
             type="button"
             aria-label="Project settings"
             data-tooltip="Project settings"
             onClick={() => setProjectSettingsOpen(true)}
           ><Wrench size={14} /></button> : null}
+          {!designOpen ? <>
           {supportsPreview ? <button
             className={`icon-button pane-header-action preview-play-button${player.open ? " is-active" : ""}`}
             type="button"
@@ -362,11 +401,16 @@ export function CodingWorkspace({
           hidden={shownTab !== "preview"}
           aria-hidden={shownTab !== "preview"}
         >
+          <ErrorBoundary label="Preview" resetKey={previewPageUrl}>
           <PreviewView
-            project={project} reload={reload} revision={workspaceRevision} url={previewPageUrl} viewport={viewport}
+            project={project} client={previewClient} onAskAgent={onAskAgent} onLogs={() => setLogsOpen(true)} onOpenFile={(path) => { setSelectedCodePath(path); setSelectedTab("code"); void selectFile(path); }} reload={reload} revision={workspaceRevision} url={previewPageUrl} viewport={viewport}
+            pausedAfterRecovery={previewPaused}
             active={shownTab === "preview"} playerOpen={player.open} suspended={player.suspended} pending={player.pending || player.checking}
             error={player.error} onPlay={playGame} stageRef={previewStage}
+            onRetry={() => onRestart()} onSettings={() => setProjectSettingsOpen(true)}
           />
+          </ErrorBoundary>
+          {logsOpen ? <PreviewLogs project={project} onClose={() => setLogsOpen(false)} /> : null}
         </div>
       ) : null}
       {shownTab === "code" ? (
@@ -404,11 +448,7 @@ export function CodingWorkspace({
         />
       ) : null}
       {project && publishDialog ? <PublishDialog project={project} publishing={publishing} justPublished={publishDialog === "success"} onClose={onClosePublish} onPublish={onPublish} /> : null}
-      {project && projectSettingsOpen ? <ProjectSettingsDialog project={project} previewUrl={previewPageUrl} onClose={() => setProjectSettingsOpen(false)} onSaved={async (updated) => {
-        onProjectUpdated?.(updated);
-        if (supportsWebPreview(updated) && updated.preview.status !== "waiting" &&
-          (webPreviewSettingsChanged(project, updated) || updated.preview.status === "stopped")) onRestart(updated);
-      }} /> : null}
+      {project && projectSettingsOpen ? <ProjectSettingsDialog project={project} previewUrl={currentPreviewUrl} onClose={() => setProjectSettingsOpen(false)} onSaved={(updated) => onProjectUpdated?.(updated)} /> : null}
     </section>
   );
 }
@@ -422,12 +462,15 @@ function PreviewControls({
   viewport,
   agentPlaytestWatch,
   agentPlaytestWatchPending,
+  project, onStop, onRestart, onReinstall, onLogs,
   onOpenSettings,
   onNavigate,
   onRefresh,
   onToggleAgentPlaytestWatch,
   onViewportChange,
 }: {
+  project?: ProjectState;
+  onStop?: () => void; onRestart: () => void; onReinstall: () => void; onLogs: () => void;
   path: string;
   paths: string[];
   previewUrl?: string;
@@ -444,6 +487,16 @@ function PreviewControls({
 }) {
   return (
     <div className="preview-controls">
+      <details className="preview-run-menu">
+        <summary aria-label="Preview actions" data-status={project?.preview.diagnostic ? "error" : project?.preview.status}><span>{project?.preview.status === "starting" ? "Starting…" : project?.preview.status === "ready" ? "Running" : project?.preview.status === "error" ? "Failed" : project?.preview.status === "waiting" ? "Waiting" : "Stopped"}{project?.preview.diagnostic ? " · Error" : ""}</span></summary>
+        <div className="preview-run-actions" onClick={(event) => { if ((event.target as Element).closest("button")) event.currentTarget.parentElement?.removeAttribute("open"); }}>
+          <button type="button" disabled={!project || project.preview.status === "starting" || project.preview.status === "waiting"} onClick={onRestart}>{project?.preview.status === "ready" ? "Restart preview service" : "Start preview"}</button>
+          {onStop ? <button type="button" disabled={!project || !["ready", "starting"].includes(project.preview.status)} onClick={onStop}>{project?.preview.status === "starting" ? "Cancel startup" : "Stop preview"}</button> : null}
+          <button type="button" onClick={onLogs}>Preview logs</button>
+          {(project?.previewMode ?? "auto") !== "static" && project?.previewMode !== "command" && project?.preview.command !== "Serve static files" ? <button type="button" disabled={project?.preview.status === "starting" || project?.preview.status === "waiting"} onClick={onReinstall}>Reinstall dependencies and restart</button> : null}
+          {previewUrl ? <button type="button" onClick={() => window.open(isolatedPreviewUrl(previewUrl, "external"), "_blank", "noopener,noreferrer")}>Open in browser</button> : null}
+        </div>
+      </details>
       <ViewportMenu value={viewport} onChange={onViewportChange} />
       <PreviewLocation
         disabled={!previewUrl}
@@ -691,16 +744,29 @@ export function playerViewport(viewport: PreviewViewport, bounds?: { width: numb
   return { width: size(bounds?.width, 1280), height: size(bounds?.height, 720) };
 }
 
-export function PreviewView({ project, reload, revision, url, viewport, active = true, playerOpen = false, suspended = false, pending = false, error, onPlay, stageRef }: {
+export function PreviewView({ project, client, onAskAgent, onOpenFile, onLogs, reload, revision, url, viewport, active = true, playerOpen = false, suspended = false, pending = false, pausedAfterRecovery = false, error, onPlay, onRetry, onSettings, stageRef }: {
+  client?: string; onAskAgent?: (text: string) => void; onOpenFile?: (path: string) => void; onLogs?: () => void;
   project?: ProjectState; reload: number; revision: number; url?: string; viewport: PreviewViewport;
   active?: boolean; playerOpen?: boolean; suspended?: boolean; pending?: boolean; error?: string; onPlay?: () => void;
+  pausedAfterRecovery?: boolean;
   stageRef?: React.Ref<HTMLDivElement>;
+  onRetry?: () => void; onSettings?: () => void;
 }) {
+  const runtime = useRuntimeConnection();
   const preview = project?.preview;
   const frame = useRef<HTMLIFrameElement>(null);
   const captureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [started, setStarted] = useState(active && !suspended);
   const [cover, setCover] = useState<string>();
+  const diagnostic = preview?.diagnostics?.length
+    ? preview.diagnostics.find((item) => playerOpen ? item.source === "player" : item.client === client)
+    : preview?.diagnostic;
+  const captureBlocked = useRef(false);
+  captureBlocked.current = !!diagnostic || runtime.status !== "ready";
+
+  useEffect(() => {
+    if (diagnostic || runtime.status !== "ready") clearTimeout(captureTimer.current);
+  }, [diagnostic, runtime.status]);
 
   useEffect(() => {
     if (suspended) { setStarted(false); clearTimeout(captureTimer.current); }
@@ -729,6 +795,7 @@ export function PreviewView({ project, reload, revision, url, viewport, active =
     clearTimeout(captureTimer.current);
     if (!project || !window.ohMyGameDesktop?.capturePage) return;
     captureTimer.current = setTimeout(() => {
+      if (captureBlocked.current) return;
       void captureProjectCover(project.id, frame).catch(() => {});
     }, 1_000);
   }
@@ -755,7 +822,28 @@ export function PreviewView({ project, reload, revision, url, viewport, active =
             onLoad={(event) => scheduleCoverCapture(event.currentTarget)}
           />
         </div>
-      ) : <PreviewState status={preview?.status} error={preview?.error} />}
+      ) : <div className="preview-status-panel">
+        <PreviewState status={preview?.status} error={preview?.error} phase={preview?.phase} startedAt={preview?.startedAt} />
+        {(pausedAfterRecovery || preview?.stopReason === "recovery") && preview?.status === "stopped" ? <p>Preview is paused after service recovery.</p> : null}
+        {preview?.status === "stopped" && preview.stopReason === "manual" ? <p>Preview was stopped. Start it when you are ready.</p> : preview?.status === "stopped" && preview.stopReason === "idle" ? <p>Preview stopped because it was not in use.</p> : preview?.status === "stopped" && project?.previewAutoStart === false ? <p>Automatic preview is disabled.</p> : null}
+        {onRetry && (preview?.status === "error" || preview?.status === "stopped") ? <div className="preview-recovery-actions">
+          <button type="button" disabled={runtime.status !== "ready"} onClick={onRetry}>{preview.status === "stopped" ? "Start preview" : "Retry preview"}</button>
+          {onSettings ? <button type="button" onClick={onSettings}>Project settings</button> : null}
+          {onLogs ? <button type="button" onClick={onLogs}>View logs</button> : null}
+          {preview?.error && onAskAgent ? <button type="button" onClick={() => onAskAgent(previewRepairPrompt(project, preview.error!))}>Ask Agent to fix</button> : null}
+        </div> : null}
+      </div>}
+      {diagnostic ? <div className="preview-diagnostic" role="alert">
+        <strong>{diagnostic.kind === "compile" ? "Preview compilation failed" : diagnostic.kind === "runtime" ? "Preview runtime error" : "Preview could not load"}</strong>
+        <details><summary>Error details</summary><pre>{diagnostic.message}</pre></details>
+        <p>{diagnostic.source === "playtest" ? "AI playtest" : diagnostic.source === "player" ? "Play window" : "Preview"}{diagnostic.path ? ` · ${diagnostic.path}` : ""}</p>
+        <div className="preview-recovery-actions">
+          <button type="button" onClick={() => void navigator.clipboard.writeText(diagnostic.message)}>Copy error</button>
+          {onLogs ? <button type="button" onClick={onLogs}>View logs</button> : null}
+          {onAskAgent ? <button type="button" onClick={() => onAskAgent(previewRepairPrompt(project, diagnostic.message))}>Ask Agent to fix</button> : null}
+          {onOpenFile && previewErrorFile(project, diagnostic.message) ? <button type="button" onClick={() => onOpenFile(previewErrorFile(project, diagnostic.message)!)}>Open source file</button> : null}
+        </div>
+      </div> : null}
       {error ? <div className="preview-player-error" role="alert">{error}</div> : null}
     </div>
   );
@@ -1389,27 +1477,45 @@ function WorkspaceState({ label, error, loading, icon }: { label?: string; error
   );
 }
 
-function PreviewState({ status, error }: { status?: ProjectState["preview"]["status"]; error?: string }) {
+function PreviewState({ status, error, phase, startedAt }: { status?: ProjectState["preview"]["status"]; error?: string; phase?: ProjectState["preview"]["phase"]; startedAt?: string }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (status !== "starting" || !startedAt) return;
+    const update = () => setElapsed(Math.max(0, Math.floor((Date.now() - Date.parse(startedAt)) / 1_000)));
+    update(); const timer = setInterval(update, 1_000); return () => clearInterval(timer);
+  }, [status, startedAt]);
   switch (status) {
-    case "error":
-      return <WorkspaceState error={error ?? "The preview process stopped."} />;
-    case "starting":
-      return (
-        <div className="preview-starting" role="status">
-          <LoaderCircle className="spin" size={14} />
-          <span>Starting preview</span>
-        </div>
-      );
-    case "waiting":
-    case undefined:
-      return <PreviewEmptyState />;
-    case "stopped":
-    case "ready":
-      return null;
-    default:
-      status satisfies never;
-      return null;
+    case "error": return <WorkspaceState error={error ?? "The preview process stopped."} />;
+    case "starting": return <div className="preview-starting" role="status"><LoaderCircle className="spin" size={14} /><span>{{ checking: "Checking environment", installing: "Installing dependencies", launching: "Starting preview server", connecting: "Waiting for preview server" }[phase ?? "launching"]} · {elapsed}s</span></div>;
+    case "waiting": return error ? <WorkspaceState label={error} /> : <PreviewEmptyState />;
+    case undefined: return <PreviewEmptyState />;
+    case "stopped": case "ready": return null;
+    default: status satisfies never; return null;
   }
+}
+
+function PreviewLogs({ project, onClose }: { project?: ProjectState; onClose: () => void }) {
+  const preview = project?.preview;
+  return <aside className="preview-logs" aria-label="Preview logs">
+    <header><strong>Preview logs</strong><button type="button" onClick={onClose} aria-label="Close preview logs"><X size={14} /></button></header>
+    <p>{preview?.directory ?? project?.startupDirectory ?? "."} · {preview?.command ?? "Not started"}</p>
+    {preview?.manager ? <p>{preview.manager} · {preview.managerSource}</p> : null}
+    <pre>{preview?.logs || preview?.error || "No output yet."}</pre>
+    {preview?.diagnostics?.map((diagnostic, index) => <details key={`${diagnostic.client}:${index}`}><summary>{diagnostic.source ?? "Preview"} · {diagnostic.path ?? "/"}</summary><pre>{diagnostic.message}</pre></details>)}
+  </aside>;
+}
+
+function previewRepairPrompt(project: ProjectState | undefined, message: string): string {
+  return `Please diagnose and fix this project's preview error. Preserve the configured runtime and package manager, and verify the result.\n\nStartup directory: ${project?.startupDirectory ?? "."}\nCommand: ${project?.preview.command ?? project?.startupScript ?? "dev"}\n\n${message}\n\nRecent output:\n${project?.preview.logs ?? "(none)"}`;
+}
+
+function previewErrorFile(project: ProjectState | undefined, message: string): string | undefined {
+  const match = message.match(/from ["']([^"']+\.(?:[jt]sx?|css|vue|svelte))["']/) ?? message.match(/(?:^|\n)([^\n]+\.(?:[jt]sx?|css|vue|svelte|html)):\d+/);
+  if (!match) return;
+  const file = match[1].trim().replaceAll("\\", "/");
+  const root = project?.workspacePath.replaceAll("\\", "/");
+  const relative = root && file.startsWith(`${root}/`) ? file.slice(root.length + 1) : file.replace(/^\.\//, "");
+  return relative.startsWith("/") || relative.split("/").includes("..") ? undefined : relative;
 }
 
 function PreviewEmptyState() {

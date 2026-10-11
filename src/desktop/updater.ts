@@ -13,7 +13,6 @@ export class DesktopUpdater {
     this.#state = { currentVersion, status: { type: "idle" } };
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
-    autoUpdater.autoRunAppAfterInstall = true;
     autoUpdater.allowPrerelease = true;
     autoUpdater.channel = "latest";
     autoUpdater.on("checking-for-update", () => this.#set({ type: "checking" }));
@@ -25,7 +24,10 @@ export class DesktopUpdater {
       this.#set({ type: "downloading", version: current.version, percent: Math.max(0, Math.min(100, Math.round(progress.percent))) });
     });
     autoUpdater.on("update-downloaded", (info) => this.#set({ type: "ready", version: info.version }));
-    autoUpdater.on("error", (error) => this.#set({ type: "error", message: error instanceof Error ? error.message : String(error) }));
+    autoUpdater.on("error", (error) => {
+      this.#installing = false;
+      this.#setError(error);
+    });
   }
 
   state(): DesktopUpdateState {
@@ -38,7 +40,6 @@ export class DesktopUpdater {
   }
 
   async check(): Promise<void> {
-    if (this.#state.status.type === "error" && this.#state.status.restartRequired) return;
     if (!app.isPackaged) {
       this.#set({ type: "up-to-date" });
       return;
@@ -65,16 +66,10 @@ export class DesktopUpdater {
     this.#installing = true;
     try {
       await this.onInstall();
-      if (process.platform === "win32") {
-        // Launch only after Electron has closed its windows and is about to exit.
-        app.once("will-quit", () => autoUpdater.quitAndInstall(false));
-        app.quit();
-      } else {
-        autoUpdater.quitAndInstall(false);
-      }
-    } catch (error) {
+      autoUpdater.quitAndInstall(false, true);
+    } catch {
       this.#installing = false;
-      this.#setError(error, true);
+      // The renderer explains why closing was cancelled. Keep the download ready to retry.
     }
   }
 
@@ -83,11 +78,7 @@ export class DesktopUpdater {
     for (const listener of this.#listeners) listener(this.#state);
   }
 
-  #setError(error: unknown, restartRequired = false): void {
-    this.#set({
-      type: "error",
-      message: error instanceof Error ? error.message : String(error),
-      ...(restartRequired ? { restartRequired: true } : {}),
-    });
+  #setError(error: unknown): void {
+    this.#set({ type: "error", message: error instanceof Error ? error.message : String(error) });
   }
 }

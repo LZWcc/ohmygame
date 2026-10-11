@@ -25,7 +25,8 @@ describe("desktop daemon process", () => {
       });
       process.send({ channel: "ohmygame:system-proxy:resolve", id: "test-proxy" });
       server.listen(Number(process.env.DAEMON_PORT), "127.0.0.1");
-      process.once("SIGTERM", () => server.close(() => process.exit(0)));
+      // This fixture can only close gracefully through IPC, as on Windows.
+      process.once("SIGTERM", () => {});
     `);
     const daemon = await startDaemon({ daemonEntry: entry, dataDirectory: directory, token: "test-token", allowedOrigins: [], executable: process.execPath, environment: {}, resolveSystemProxy: async () => "PROXY 127.0.0.1:7890" });
     try {
@@ -111,9 +112,11 @@ describe("desktop daemon process", () => {
       import { writeFileSync } from "node:fs";
       import { createServer } from "node:http";
       writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+      let token = "";
+      for await (const chunk of process.stdin) token += chunk;
       const server = createServer((request, response) => {
-        response.statusCode = request.url === "/health" && request.headers.authorization === "Bearer test-token" ? 200 : 401;
-        response.end(JSON.stringify({ development: process.argv.includes("--dev") }));
+        response.statusCode = request.url === "/health" && request.headers.authorization === "Bearer " + token ? 200 : 401;
+        response.end(JSON.stringify({ development: process.argv.includes("--dev"), tokenInEnvironment: Object.keys(process.env).some((name) => name.toUpperCase() === "OHMYGAME_DAEMON_TOKEN") }));
       });
       server.listen(Number(process.env.DAEMON_PORT), "127.0.0.1");
       process.once("SIGTERM", () => server.close(() => process.exit(0)));
@@ -125,21 +128,24 @@ describe("desktop daemon process", () => {
       token: "test-token",
       allowedOrigins: ["null"],
       executable: process.execPath,
-      environment: {},
+      environment: { OHMYGAME_DAEMON_TOKEN: "stale-desktop-token", ohmygame_daemon_token: "stale-desktop-token" },
       development,
       healthTimeoutMs: 2_000,
     });
     const pid = Number(await readFile(pidFile, "utf8"));
 
-    expect((await fetch(`${daemon.runtime.url}/health`)).status).toBe(401);
-    expect((await fetch(`${daemon.runtime.url}/health`, {
-      headers: { authorization: "Bearer test-token" },
-    })).status).toBe(200);
-    expect(daemon.runtime.token).toBe("test-token");
-    expect(await (await fetch(`${daemon.runtime.url}/health`, {
-      headers: { authorization: "Bearer test-token" },
-    })).json()).toEqual({ development });
-    await daemon.stop();
+    try {
+      expect((await fetch(`${daemon.runtime.url}/health`)).status).toBe(401);
+      expect((await fetch(`${daemon.runtime.url}/health`, {
+        headers: { authorization: "Bearer test-token" },
+      })).status).toBe(200);
+      expect(daemon.runtime.token).toBe("test-token");
+      expect(await (await fetch(`${daemon.runtime.url}/health`, {
+        headers: { authorization: "Bearer test-token" },
+      })).json()).toEqual({ development, tokenInEnvironment: false });
+    } finally {
+      await daemon.stop();
+    }
     await vi.waitFor(() => expect(isRunning(pid)).toBe(false));
   });
 

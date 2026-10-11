@@ -31,7 +31,8 @@ the daemon address plus a random process-scoped token through the isolated
 preload bridge. The renderer has no Node.js access.
 
 Bun 1.4.2 installs dependencies and executes builds, tests, and most preparation
-scripts. Pinned Plugin archives use Node to preserve their locked ZIP checksums;
+scripts. Pinned Plugin archives are prepared with Node and store their entries
+uncompressed, so their locked ZIP checksums do not depend on the zlib build;
 desktop runtime preparation uses Node and its built-in environment-file loader.
 Standalone daemon development and `bun run start` use Node.js 22.19+
 explicitly; desktop development and packaged apps run the daemon with
@@ -60,6 +61,13 @@ and gives the daemon time to stop active Pi and preview processes.
 The renderer receives a small runtime event stream over SSE rather than Pi's
 internal event objects. Reconnects replay recent events, and conversations are
 restored from Pi's session files, so a reload does not lose or duplicate turns.
+
+Preview failures stay with their project. The desktop supervises unexpected
+daemon exits and reconnects the existing renderer to a fresh service generation.
+See [preview isolation and service recovery](runtime-recovery.md) for behavior,
+recovery limits, and validation scenarios.
+See [preview configuration and lifecycle](preview-runtime.md) for startup modes,
+automatic policy, idle collection, logs, and browser storage.
 
 ## Network proxy
 
@@ -123,23 +131,35 @@ Pi runs in trusted-local mode. The workspace is Pi's working directory, but
 without an OhMyGame approval prompt. Provider credentials stay in the daemon
 and are never written to workspaces or returned to the renderer.
 
+The desktop app writes the daemon's access token to the daemon's stdin, not
+to its environment, which other processes of the same user can read. A daemon
+started on its own may be given the token in `OHMYGAME_DAEMON_TOKEN`; it
+removes the variable at startup, though the original environment may still
+be visible in process listings. Either way no process the daemon starts
+inherits the token: preview servers, dependency installs, publish builds, the
+Agent's shell, stdio MCP servers, and Git. Project processes also run without
+the daemon's other settings (`OHMYGAME_*`, `DAEMON_HOST`, `DAEMON_PORT`).
+
 ## Agent game use
 
-General Game projects start as engine-independent workspaces with Code,
-Design, and Assets. The bundled Game Studio plugin provides game production,
+General Game projects open on Design as engine-independent workspaces with
+Code, Design, Assets and Web preview. The bundled Game Studio plugin provides game production,
 architecture, and verification Skills for General Game, Godot, and Interactive
 Story projects. Web Game keeps its independent Web Game Studio plugin and
 existing creation instructions. Plugins are enabled by default; a saved disabled
 setting is respected when creating a project or agent session. Compatible
 Skills are listed for the agent, which reads the relevant ones for its task.
 
-General Game's **Web preview** switch in **Project settings** is off by default.
-The user controls this capability; adding a dev script does not enable it.
-Enabling it exposes Preview, Play, and the available Web `game_use` tool. It can
-be enabled before browser output exists; the preview starts when the configured
-startup script becomes runnable. Disabling it stops the preview server and returns
+General Game's **Web preview** switch in **Project settings** is on for newly
+created projects. Existing projects retain their saved switch; projects without
+the setting remain off. Adding a dev script does not override an explicit opt-out.
+The switch is available from Design, Code and Preview, and exposes Preview,
+Play, and the available Web `game_use` tool. It can be enabled before browser
+output exists; automatic preview starts when its
+configured script, static HTML, or custom command becomes runnable. Disabling it stops the preview server and returns
 the workspace to Code if Preview was selected. The switch survives reload and
-duplication. Web Game keeps its existing preview behavior.
+duplication. Native Electron, Tauri and Godot scripts are not treated as Web
+servers. Web Game keeps its existing preview behavior.
 
 Web publishing is independent of the switch: it validates a static `index.html`
 or the configured build's static output. Native engines use their own tools or
@@ -157,7 +177,8 @@ The human window uses the Preview's browser storage and receives no editor
 preload or daemon credentials. Moving between the iframe and player reloads
 the game, so in-memory progress is not transferred; saved progress depends on
 the game's storage. Reload targets the active human game. A restarted server
-updates an open player to its new origin. Human play and agent tests share the
+reloads an open player at its current route. The preview origin is retained across
+restarts when its saved port is available. Human play and agent tests share the
 development server and source, so code changes can still hot-update both.
 
 The desktop runtime exposes game interaction and verification as the Pi custom
@@ -258,6 +279,7 @@ projects/<project-id>/
 ├── project.json   project identity and latest publication
 ├── cover.webp     custom cover; its presence stops automatic replacement
 ├── cover-auto.webp last automatic cover, retained when a custom cover is applied
+├── preview-origin.json stable local preview port
 ├── workspace/     the project files (or an existing folder in the desktop app)
 └── session/       Pi session files, one per conversation
 ```

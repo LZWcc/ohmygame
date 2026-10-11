@@ -64,7 +64,7 @@ export function NodeThumbnailPage({
           );
           if (!frame || status) return finish(false);
           const image = await captureElementImage(frame, NODE_THUMBNAIL_WIDTH);
-          if (!image) return finish(false);
+          if (cancelled || done.current || !image) return finish(false);
           await setPlayableThumbnail(projectId, nodeId, runningHash, image);
           finish(true);
         })

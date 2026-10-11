@@ -1,3 +1,4 @@
+import { protocolOperations } from "./model3d-operations.js";
 import {
   IMAGE_ASPECT_RATIOS, IMAGE_OUTPUT_COUNTS, IMAGE_RESOLUTIONS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS,
   type CustomImageModelSettings, type CustomModel3DSettings, type CustomModelUsages, type CustomProviderModel,
@@ -30,7 +31,7 @@ export function defaultModel3DSettings(modelType: CustomModel3DSettings["modelTy
   if (protocol === "hyper3d") return { protocol, operation: "multi-image-to-3d", modelType: "standard", maxReferenceImages: 5,
     polycount: { min: 500, max: 1_000_000, default: 4_000, presets: [1_000, 4_000, 10_000, 20_000, 100_000] }, supportsTexture: true, supportsPbr: true };
   if (protocol === "tripo") return { protocol, operation: "multi-image-to-3d", modelType: "standard", maxReferenceImages: 4,
-    polycount: { min: 100, max: 20_000, default: 4_000, presets: [1_000, 4_000, 10_000, 20_000] }, supportsTexture: true, supportsPbr: true };
+    polycount: { min: 50, max: 20_000, default: 4_000, presets: [1_000, 4_000, 10_000, 20_000] }, supportsTexture: true, supportsPbr: true };
   if (modelType === "smart-topology") return { protocol: "meshy", operation: "image-to-3d", modelType, maxReferenceImages: 1,
     polycount: { min: 100, max: 15_000, default: 4_000, presets: [1_000, 4_000, 10_000, 15_000] }, supportsTexture: true, supportsPbr: true };
   return { protocol: "meshy", operation: "image-to-3d", modelType: "standard", maxReferenceImages: 1,
@@ -52,11 +53,11 @@ export function customVideoModel(provider: CustomProviderSettings, model: Custom
 }
 export function customModel3D(provider: CustomProviderSettings, model: CustomProviderModel): Model3DModel | undefined {
   const config = model.usages?.["3d"];
-  return config ? model3DModel(provider.id, provider.name, { id: model.id, name: model.name, settings: config }) : undefined;
+  return config ? { ...model3DModel(provider.id, provider.name, { id: model.id, name: model.name, settings: config }), operations: ["image", ...(config.operations ?? [])] } : undefined;
 }
 export function model3DModel(provider: string, providerName: string, model: Model3DDefinition): Model3DModel {
   const config = model.settings;
-  return { provider, providerName, id: model.id, name: model.name,
+  return { provider, providerName, id: model.id, name: model.name, protocol: config.protocol, operations: protocolOperations(config.protocol),
     ...(config.protocol === "tripo" ? { referenceImageLabels: ["Front", "Left", "Back", "Right"] } : {}),
     ...(config.protocol === "hyper3d" ? { estimatedCredits: hyper3DCredits(model.id) } : {}),
     maxReferenceImages: config.maxReferenceImages, polycount: config.polycount, supportsTexture: config.supportsTexture,
@@ -102,7 +103,7 @@ export function normalizeModelUsages(value: unknown): CustomModelUsages | undefi
     const maxReferenceImages = integer(config.maxReferenceImages, 1, config.operation === "image-to-3d" ? 1 : config.protocol === "hyper3d" ? 5 : 4, "3D reference image limit");
     if (!object(config.polycount)) throw new Error("Set the 3D polycount range");
     const limit = config.protocol === "hyper3d" ? 2_000_000 : config.protocol === "tripo" ? 1_500_000 : 300_000;
-    const min = integer(config.polycount.min, config.protocol === "hyper3d" ? 500 : 100, limit, "minimum polycount");
+    const min = integer(config.polycount.min, config.protocol === "hyper3d" ? 500 : config.protocol === "tripo" ? 48 : 100, limit, "minimum polycount");
     const max = integer(config.polycount.max, min, limit, "maximum polycount");
     const defaultCount = integer(config.polycount.default, min, max, "default polycount");
     if (!Array.isArray(config.polycount.presets) || !config.polycount.presets.length || config.polycount.presets.length > 20) throw new Error("Set polycount presets");
@@ -114,7 +115,8 @@ export function normalizeModelUsages(value: unknown): CustomModelUsages | undefi
         || config.defaults.texture && !config.supportsTexture || config.defaults.pbr && (!config.defaults.texture || !config.supportsPbr)) throw new Error("Generation defaults must use supported texture and PBR options");
       defaults = { texture: config.defaults.texture, pbr: config.defaults.pbr };
     }
-    usages["3d"] = { protocol: config.protocol as CustomModel3DSettings["protocol"], ...endpoint(config), operation: config.operation as CustomModel3DSettings["operation"],
+    const operations = config.operations === undefined ? undefined : Array.isArray(config.operations) && !config.operations.length ? [] : choices(config.operations, protocolOperations(config.protocol as CustomModel3DSettings["protocol"]), "3D operations");
+    usages["3d"] = { ...(operations ? { operations } : {}), protocol: config.protocol as CustomModel3DSettings["protocol"], ...endpoint(config), operation: config.operation as CustomModel3DSettings["operation"],
       modelType: config.modelType as CustomModel3DSettings["modelType"], maxReferenceImages,
       polycount: { min, max, default: defaultCount, presets }, supportsTexture: config.supportsTexture, supportsPbr: config.supportsPbr,
       ...(defaults ? { defaults } : {}) };

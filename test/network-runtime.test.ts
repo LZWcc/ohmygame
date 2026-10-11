@@ -25,7 +25,9 @@ describe("Node proxy transport", () => {
       const proxyUrl = `http://127.0.0.1:${ports.proxy}`;
       const script = `
         import assert from 'node:assert/strict';
+        import dns from 'node:dns';
         import { once } from 'node:events';
+        import { syncBuiltinESMExports } from 'node:module';
         import OpenAI from 'openai';
         import Anthropic from '@anthropic-ai/sdk';
         import { GoogleGenAI } from '@google/genai';
@@ -53,8 +55,21 @@ describe("Node proxy transport", () => {
         assert.equal(diagnostic.reachable, true); assert.equal(diagnostic.statusCode, 401);
         assert.equal(service.get().active.source, 'environment');
         const allBypass = activateNetworkProxy(resolveNetworkProxy({ mode: 'manual', proxyUrl: ${JSON.stringify(proxyUrl)}, noProxy: '*' }, {}));
-        // The reserved domain cannot resolve directly; an incorrect route would create a proxy tunnel.
-        await assert.rejects(fetch('https://all-bypass.invalid/all-bypass', { signal: AbortSignal.timeout(2000) }));
+        // Fail this reserved hostname locally so the probe never waits on system DNS.
+        // An incorrect proxy route would bypass this lookup and create a tunnel.
+        const lookup = dns.lookup;
+        dns.lookup = (hostname, options, callback) => {
+          if (hostname !== 'all-bypass.invalid') return lookup(hostname, options, callback);
+          const complete = typeof options === 'function' ? options : callback;
+          queueMicrotask(() => complete(Object.assign(new Error('Fixture hostname not found'), { code: 'ENOTFOUND' })));
+        };
+        syncBuiltinESMExports();
+        try {
+          await assert.rejects(fetch('https://all-bypass.invalid/all-bypass', { signal: AbortSignal.timeout(2000) }), error => error.cause?.code === 'ENOTFOUND');
+        } finally {
+          dns.lookup = lookup;
+          syncBuiltinESMExports();
+        }
         await allBypass.destroy();
         const direct = activateNetworkProxy({ source: 'direct', noProxy: '127.0.0.1,localhost,::1,[::1]' });
         assert.equal(process.env.HTTP_PROXY, undefined); assert.equal(process.env.https_proxy, undefined);

@@ -19,7 +19,6 @@ try {
     piAgentDirectory: path.join(directory, "pi-agent"),
     token: "node-runtime-check",
     allowedOrigins: [],
-    resolveSystemProxy: async () => "DIRECT",
   });
   const unauthorized = await fetch(`${daemon.runtime.url}/projects`);
   assert.equal(unauthorized.status, 401);

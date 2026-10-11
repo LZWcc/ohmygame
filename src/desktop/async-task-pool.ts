@@ -31,6 +31,7 @@ export class AsyncTaskPool {
       this.#active += 1;
     }
     try {
+      signal?.throwIfAborted();
       return await task();
     } finally {
       const next = this.#waiters.shift();

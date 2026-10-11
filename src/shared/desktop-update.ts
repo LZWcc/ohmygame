@@ -5,7 +5,7 @@ export type DesktopUpdateStatus =
   | { type: "available"; version: string }
   | { type: "downloading"; version: string; percent: number }
   | { type: "ready"; version: string }
-  | { type: "error"; message: string; restartRequired?: boolean };
+  | { type: "error"; message: string };
 
 export interface DesktopUpdateState {
   currentVersion: string;

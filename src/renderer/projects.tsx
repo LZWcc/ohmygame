@@ -1,3 +1,4 @@
+import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { ArrowDownUp, FolderPlus, LoaderCircle, RefreshCw, Search, X } from "./icons.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ProjectAgentActivity, ProjectState, ProjectType } from "../shared/contracts.js";
@@ -6,7 +7,7 @@ import { ProjectCard } from "./project-card.js";
 import { ProjectCreateDialog } from "./project-create-dialog.js";
 import { ProjectRenameDialog } from "./project-rename-dialog.js";
 import { projectDeletionConfirmation } from "./project-deletion.js";
-import { projectsHash, type AppNavigationTarget } from "./routes.js";
+import { createdProjectView, projectsHash, type AppNavigationTarget } from "./routes.js";
 import { SidebarPageHeader, SidebarPageLayout } from "./sidebar-page.js";
 import { PROJECT_TYPES } from "./project-types.js";
 
@@ -19,6 +20,7 @@ interface ProjectsPageProps {
 type ProjectSort = "updated" | "name";
 
 export function ProjectsPage({ projectType = "all", onNavigate, onOpenProject }: ProjectsPageProps) {
+  const serviceGeneration = useReadyRuntimeGeneration();
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [activity, setActivity] = useState<ProjectAgentActivity[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
@@ -45,7 +47,7 @@ export function ProjectsPage({ projectType = "all", onNavigate, onOpenProject }:
     }
   }
 
-  useEffect(() => { void load(); }, []);
+  useEffect(() => { void load(); }, [serviceGeneration]);
   useEffect(() => {
     if (phase !== "ready") return;
     const controller = new AbortController();
@@ -178,7 +180,7 @@ export function ProjectsPage({ projectType = "all", onNavigate, onOpenProject }:
       }} /> : null}
       {createOpen ? <ProjectCreateDialog initialType={projectType === "all" ? "web-game" : projectType} onClose={() => setCreateOpen(false)} onCreated={(project) => {
         setCreateOpen(false);
-        onOpenProject(project.id);
+        onOpenProject(project.id, createdProjectView(project.type));
       }} /> : null}
     </SidebarPageLayout>
   );

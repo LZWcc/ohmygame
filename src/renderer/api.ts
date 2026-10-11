@@ -1,3 +1,5 @@
+import { runtimeConnection, subscribeRuntimeConnection } from "./runtime-connection.js";
+import type { DesktopRuntimeService } from "../shared/desktop-runtime.js";
 import {
   RUNTIME_EVENT_TYPES,
   type AgentContextUsage,
@@ -100,9 +102,12 @@ declare global {
     ohMyGameDesktop?: {
       platform: string;
       runtime: DesktopRuntime;
+      runtimeService?: DesktopRuntimeService;
       openExternal: (url: string) => Promise<void>;
       setAppearance: (appearance: "system" | "light" | "dark") => Promise<void>;
       restartApp?: () => Promise<void>;
+      onPrepareClose?: (listener: () => Promise<void>) => () => void;
+      onCancelClose?: (listener: (error: string) => void) => () => void;
       windowMenu?: {
         icon: () => Promise<string>;
         popup: (label: string, x: number, y: number) => Promise<void>;
@@ -119,7 +124,7 @@ declare global {
       capturePage: (bounds: { x: number; y: number; width: number; height: number }) => Promise<Uint8Array>;
       /** Captures a Node's thumbnail in a hidden window; `false` when it could not. */
       captureNodeThumbnail?: (projectId: string, nodeId: string, viewport: { width: number; height: number }, batchId: string) => Promise<boolean>;
-      /** Cancels captures in a batch that have not opened a hidden window yet. */
+      /** Cancels active and queued captures in a batch. */
       cancelNodeThumbnails?: (batchId: string) => Promise<void>;
       /** Called by the hidden thumbnail window once its capture is stored or failed. */
       finishNodeThumbnail?: (captured: boolean) => Promise<void>;
@@ -374,8 +379,14 @@ export async function listModel3DCatalog(): Promise<MediaModelCatalog<Model3DMod
 }
 
 /** Preset moves for rigged humanoids; empty until a 3D provider is set up. */
-export async function listModel3DAnimations(): Promise<Model3DAnimationAction[]> {
-  return request("/model3d-animations");
+export async function listModel3DAnimations(model?: AgentModelRef, options?: import("../shared/contracts.js").Model3DOptions): Promise<Model3DAnimationAction[]> {
+  const query = new URLSearchParams({ ...(model ? { provider: model.provider, id: model.id } : {}),
+    ...(options?.rigModel ? { rigModel: options.rigModel } : {}), ...(options?.rigType ? { rigType: options.rigType } : {}) });
+  return request(`/model3d-animations?${query}`);
+}
+export async function listModel3DOperations(): Promise<Model3DModel[]> { return request("/model3d-operations"); }
+export async function model3DBalance(model: AgentModelRef): Promise<import("../shared/contracts.js").Model3DBalance> {
+  return request(`/model3d-balance?${new URLSearchParams({ provider: model.provider, id: model.id })}`);
 }
 
 export async function getWebSearchSettings(): Promise<WebSearchSettings> {
@@ -723,8 +734,8 @@ export async function setConversationReasoning(
   return result.level;
 }
 
-export async function startPreview(projectId: string): Promise<{ url: string }> {
-  return request(`/projects/${projectId}/preview`, { method: "POST" });
+export async function startPreview(projectId: string, reinstall = false): Promise<{ url: string }> {
+  return request(`/projects/${projectId}/preview${reinstall ? "?reinstall=1" : ""}`, { method: "POST" });
 }
 
 export async function sendPrompt(
@@ -842,6 +853,7 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -862,8 +874,8 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 
 async function responseError(response: Response): Promise<ApiError> {
-  const body = await response.json().catch(() => ({})) as { error?: string; message?: string };
-  return new ApiError(body.message ?? body.error ?? `Request failed with ${response.status}`, response.status);
+  const body = await response.json().catch(() => ({})) as { error?: string; message?: string; code?: string };
+  return new ApiError(body.message ?? body.error ?? `Request failed with ${response.status}`, response.status, body.code);
 }
 
 async function streamProjectEvents(
@@ -878,11 +890,21 @@ async function streamProjectEvents(
   },
 ): Promise<void> {
   let cursor = initialCursor;
+  let generation = runtimeConnection().generation;
   while (!signal.aborted) {
+    const connection = new AbortController();
+    const unsubscribe = subscribeRuntimeConnection(() => connection.abort());
+    const connectionSignal = AbortSignal.any([signal, connection.signal]);
     try {
+      const current = runtimeConnection();
+      if (current.status !== "ready") throw new Error("Background service unavailable");
+      if (current.generation !== generation) {
+        generation = current.generation;
+        cursor = handlers.onReset ? await handlers.onReset() : 0;
+      }
       const response = await fetch(apiUrl(`/projects/${projectId}/events?cursor=${cursor}`), {
         headers: { accept: "text/event-stream", ...runtimeHeaders() },
-        signal,
+        signal: connectionSignal,
       });
       if (response.status === 409 && handlers.onReset) {
         cursor = await handlers.onReset();
@@ -896,12 +918,13 @@ async function streamProjectEvents(
         if (event.id <= cursor) return;
         cursor = Math.max(cursor, event.id);
         handlers.onEvent(event);
-      }, signal);
+      }, connectionSignal);
       if (!signal.aborted) handlers.onError();
     } catch {
       if (signal.aborted) return;
       handlers.onError();
     }
+    finally { unsubscribe(); }
     await reconnectDelay(signal);
   }
 }
@@ -1047,7 +1070,11 @@ function modelRef(model: AgentModelRef): AgentModelRef {
 }
 
 function desktopRuntime(): DesktopRuntime | undefined {
-  return window.ohMyGameDesktop?.runtime;
+  const desktop = window.ohMyGameDesktop;
+  if (!desktop) return;
+  const state = runtimeConnection();
+  if (state.status !== "ready") throw new Error("The background service is unavailable. Wait for recovery or restart it.");
+  return state.runtime ? { daemonUrl: state.runtime.url, token: state.runtime.token } : desktop.runtime;
 }
 
 function reconnectDelay(signal: AbortSignal): Promise<void> {
@@ -1097,4 +1124,17 @@ export async function readPluginMcpDefinition(id: string, server: string): Promi
 }
 export async function savePluginMcpDefinition(id: string, server: string, definition: import("../shared/plugins.js").McpServerDefinition): Promise<PluginDetail> {
   return request(`/plugins/${encodeURIComponent(id)}/mcp/${encodeURIComponent(server)}/definition`, { method: "PUT", body: JSON.stringify({ definition }) });
+}
+
+export async function stopPreview(projectId: string): Promise<{ preview: ProjectState["preview"] }> {
+  return request(`/projects/${projectId}/preview`, { method: "DELETE" });
+}
+export async function acquirePreview(projectId: string, leaseId: string, automatic = false, paused = false): Promise<void> {
+  await request(`/projects/${projectId}/preview/leases/${leaseId}`, { method: "PUT", body: JSON.stringify({ automatic, paused }) });
+}
+export async function releasePreview(projectId: string, leaseId: string): Promise<void> {
+  await request(`/projects/${projectId}/preview/leases/${leaseId}`, { method: "DELETE" });
+}
+export async function inspectProjectPreview(projectId: string, settings: ProjectRunSettings): Promise<{ mode?: string; manager?: string; source?: string; error?: string }> {
+  return request(`/projects/${projectId}/preview/inspect`, { method: "POST", body: JSON.stringify(settings) });
 }

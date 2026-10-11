@@ -1,3 +1,4 @@
+import { previewPagePath } from "../src/shared/preview-page.js";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { webGamePlayerUrl } from "../src/shared/web-game-player.js";
 
@@ -46,7 +47,9 @@ describe("human game windows", () => {
     await players.open("game", { ...request, path: "/different", viewport: { width: 1280, height: 720 } }, resolve);
     expect(resolve).toHaveBeenCalledOnce();
     expect(electron.windows).toHaveLength(1);
-    expect(window.loadURL).toHaveBeenCalledExactlyOnceWith("http://127.0.0.1:43123/play?mode=story#start");
+    expect(window.loadURL).toHaveBeenCalledOnce();
+    expect(previewPagePath(window.url)).toBe("/play?mode=story#start");
+    expect(new URL(window.url).searchParams.get("__ohmygame_view")).toBe("player");
     expect(window.options).toMatchObject({ width: 375, height: 667, useContentSize: true });
     expect(window.options.webPreferences).toEqual({ sandbox: true, contextIsolation: true, nodeIntegration: false });
     expect(window.restore).toHaveBeenCalledOnce();
@@ -97,7 +100,8 @@ describe("human game windows", () => {
     await players.refresh("game", async () => target);
     expect(window.loadURL).toHaveBeenCalledOnce();
     await players.refresh("game", async () => ({ ...target, url: "http://127.0.0.1:43124" }));
-    expect(window.url).toBe("http://127.0.0.1:43124/level-2?save=1#boss");
+    expect(new URL(window.url).origin).toBe("http://127.0.0.1:43124");
+    expect(previewPagePath(window.url)).toBe("/level-2?save=1#boss");
     const allowed = { preventDefault: vi.fn() };
     window.navigate?.(allowed, "http://127.0.0.1:43124/level-3");
     expect(allowed.preventDefault).not.toHaveBeenCalled();

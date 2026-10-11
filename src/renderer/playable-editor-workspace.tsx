@@ -70,7 +70,6 @@ import type { PlayableChatState } from "./playable-chat.js";
 import { buildCodebase, createFlowNode, nodeIdForIssuePath, nodeSourcePaths, toFlowEdge, toFlowNode, uniqueNodeId, type GraphMeta, type PlayableFlowData, type PlayableFlowNode } from "./playable-flow.js";
 import { PLAYABLE_NODE_TYPES, PlayableCanvasContext } from "./playable-node-card.js";
 import { PlayableAddControl, PlayableCanvasContextMenu, PlayableEmptyCanvas } from "./playable-canvas-menus.js";
-import { capturePlayableThumbnails } from "./playable-thumbnail-capture.js";
 import { WorkspaceTabs, type WorkspaceTabOption } from "./workspace-tabs.js";
 
 const DEFAULT_CANVAS_VIEWPORT = { x: 64, y: 32, zoom: 1 };
@@ -180,21 +179,6 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
   const historyTimer = useRef<number | undefined>(undefined);
   const historyGestureBase = useRef<NodeCodebase | undefined>(undefined);
   const [, setHistoryRevision] = useState(0);
-  /** The build of each Node the canvas last tried to capture, so a failure is not retried. */
-  const thumbnailAttempts = useRef(new Map<string, string>());
-  const thumbnailCaptureBatch = useRef<string | undefined>(undefined);
-  const thumbnailCaptureTarget = useRef({
-    projectId,
-    builtDefinition,
-    workspaceRevision,
-    codeRevision,
-  });
-  thumbnailCaptureTarget.current = {
-    projectId,
-    builtDefinition,
-    workspaceRevision,
-    codeRevision,
-  };
 
   const codebase = useMemo(
     () => graphMeta ? buildCodebase(graphMeta, nodes, edges, editorLayout, workspaceView) : undefined,
@@ -283,70 +267,40 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
 
   useEffect(() => {
     setThumbnails(undefined);
-    thumbnailAttempts.current.clear();
   }, [projectId]);
 
-  useEffect(() => () => {
-    const batchId = thumbnailCaptureBatch.current;
-    if (!batchId) return;
-    thumbnailCaptureBatch.current = undefined;
-    void window.ohMyGameDesktop?.cancelNodeThumbnails?.(batchId).catch(() => {});
-  }, [projectId, builtDefinition, workspaceRevision, codeRevision]);
-
-  useEffect(() => {
-    let disposed = false;
-    void listPlayableThumbnails(projectId).then((manifest) => {
-      if (!disposed) setThumbnails(manifest);
-    }).catch(() => {});
-    return () => { disposed = true; };
-  }, [projectId, workspaceRevision]);
-
   // Submit every missing thumbnail; the desktop limits hidden windows, while
-  // each completed capture becomes visible without waiting for slower Nodes.
+  // this effect owns the batch and publishes each completed capture. A new
+  // build reads the cache again, including Nodes cancelled before they ran.
   useEffect(() => {
     const capture = window.ohMyGameDesktop?.captureNodeThumbnail;
-    if (!capture || !builtDefinition || !thumbnails) return;
-    const pending = builtDefinition.graph.nodes.flatMap((node) => {
-      const hash = playableThumbnailHash(builtDefinition, node.id);
-      return hash && thumbnails[node.id]?.hash !== hash
-        && thumbnailAttempts.current.get(node.id) !== hash ? [{ nodeId: node.id, hash }] : [];
-    });
-    if (!pending.length) return;
-    for (const { nodeId, hash } of pending) {
-      thumbnailAttempts.current.set(nodeId, hash);
-    }
-    const definition = builtDefinition;
-    const viewport = builtDefinition.graph.viewport;
     const batchId = crypto.randomUUID();
-    thumbnailCaptureBatch.current = batchId;
-    const target = {
-      projectId,
-      definition,
-      workspaceRevision,
-      codeRevision,
+    let disposed = false;
+    let capturing = false;
+    void (async () => {
+      const manifest = await listPlayableThumbnails(projectId);
+      if (disposed) return;
+      setThumbnails(manifest);
+      if (!capture || !builtDefinition) return;
+      const pending = builtDefinition.graph.nodes.flatMap((node) => {
+        const hash = playableThumbnailHash(builtDefinition, node.id);
+        return hash && manifest[node.id]?.hash !== hash ? [{ nodeId: node.id, hash }] : [];
+      });
+      if (!pending.length) return;
+      capturing = true;
+      await Promise.all(pending.map(async ({ nodeId, hash }) => {
+        const captured = await capture(projectId, nodeId, builtDefinition.graph.viewport, batchId).catch(() => false);
+        if (!captured || disposed) return;
+        const updated = await listPlayableThumbnails(projectId);
+        if (disposed || updated[nodeId]?.hash !== hash) return;
+        setThumbnails((cached) => ({ ...cached, [nodeId]: updated[nodeId]! }));
+      }));
+    })().catch(() => {});
+    return () => {
+      disposed = true;
+      if (capturing) void window.ohMyGameDesktop?.cancelNodeThumbnails?.(batchId).catch(() => {});
     };
-    void capturePlayableThumbnails(
-      pending,
-      ({ nodeId }) => capture(projectId, nodeId, viewport, batchId),
-      async () => {
-        const manifest = await listPlayableThumbnails(projectId).catch(
-          () => undefined,
-        );
-        const current = thumbnailCaptureTarget.current;
-        if (
-          !manifest ||
-          current.projectId !== target.projectId ||
-          current.builtDefinition !== target.definition ||
-          current.workspaceRevision !== target.workspaceRevision ||
-          current.codeRevision !== target.codeRevision
-        )
-          return;
-        setThumbnails((cached) => ({ ...cached, ...manifest }));
-      },
-    ).catch(() => {}).finally(() => {
-      if (thumbnailCaptureBatch.current === batchId) thumbnailCaptureBatch.current = undefined;
-    });
-  }, [projectId, builtDefinition, thumbnails, workspaceRevision, codeRevision]);
+  }, [projectId, builtDefinition]);
 
   /**
    * Adopts a whole codebase into the editor. `diskRevision` says it is what

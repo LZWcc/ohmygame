@@ -1,3 +1,4 @@
+import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { useEffect, useState } from "react";
 import type {
   EffectiveNetworkProxy,
@@ -20,6 +21,7 @@ const SOURCE_LABELS: Record<EffectiveNetworkProxy["source"], string> = {
 };
 
 export function NetworkSettingsPanel() {
+  const serviceGeneration = useReadyRuntimeGeneration();
   const [state, setState] = useState<NetworkSettingsState>();
   const [form, setForm] = useState<NetworkSettings>();
   const [busy, setBusy] = useState<"save" | "detect" | "test" | "restart">();
@@ -33,7 +35,8 @@ export function NetworkSettingsPanel() {
       .then((next) => {
         if (disposed) return;
         setState(next);
-        setForm(next.settings);
+        setError(undefined);
+        setForm((current) => current ?? next.settings);
       })
       .catch((cause) => {
         if (!disposed) setError(errorMessage(cause));
@@ -41,7 +44,7 @@ export function NetworkSettingsPanel() {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [serviceGeneration]);
 
   function update(patch: Partial<NetworkSettings>) {
     setForm((current) => (current ? { ...current, ...patch } : current));
@@ -179,7 +182,7 @@ export function NetworkSettingsPanel() {
             </label>
             {canDetect ? (
               <button
-                className="settings-secondary-button"
+                className="settings-add-button"
                 type="button"
                 onClick={() => void perform("detect")}
               >
@@ -234,7 +237,7 @@ export function NetworkSettingsPanel() {
       ) : null}
       <div className="settings-form-actions">
         <button
-          className="settings-secondary-button"
+          className="settings-add-button"
           type="button"
           disabled={Boolean(busy) || (manual && !form.proxyUrl.trim())}
           onClick={() => void perform("test")}
