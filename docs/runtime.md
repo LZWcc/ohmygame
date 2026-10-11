@@ -191,8 +191,10 @@ tool `game_use`. This is an OhMyGame core capability rather than a Plugin:
 3. Electron main owns hidden, per-playtest `BrowserWindow` sessions using the
    bundled Chromium runtime.
 4. The custom tool returns bounded DOM, canvas, console, failed-request, and
-   optional game-state data. PNG captures are returned to the model as image
-   content.
+   optional game-state data. Captures are scaled from device pixels to the
+   page's CSS pixels, keeping their aspect ratio so image pixels match input
+   coordinates, and returned to the model as JPEG image content. Every later
+   request resends them, so they stay small.
 
 The tool supports `open`, `inspect`, `act`, `capture`, and `close`. Runtime
 adapters receive a typed open target; the Web adapter uses a Preview URL while
