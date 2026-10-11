@@ -179,7 +179,7 @@ export function NetworkSettingsPanel() {
             </label>
             {canDetect ? (
               <button
-                className="settings-secondary-button"
+                className="settings-add-button"
                 type="button"
                 onClick={() => void perform("detect")}
               >
@@ -234,7 +234,7 @@ export function NetworkSettingsPanel() {
       ) : null}
       <div className="settings-form-actions">
         <button
-          className="settings-secondary-button"
+          className="settings-add-button"
           type="button"
           disabled={Boolean(busy) || (manual && !form.proxyUrl.trim())}
           onClick={() => void perform("test")}

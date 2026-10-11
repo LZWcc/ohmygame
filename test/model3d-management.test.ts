@@ -1,3 +1,4 @@
+import { TEST_GLB } from "./model3d-fixture.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -20,7 +21,7 @@ async function fixture(provider: "meshy" | "tripo" | "hyper3d", directory?: stri
   if (!directories.includes(directory)) directories.push(directory);
   const runtime = await ModelRuntime.create({ authPath: path.join(directory, "auth.json"), modelsPath: path.join(directory, "models.json"), modelsStorePath: path.join(directory, "catalog.json"), allowModelNetwork: false });
   const request = vi.fn<typeof fetch>(async (url, init) => {
-    if (String(url) === "https://files.test/model.glb") return new Response(Buffer.from("glb"));
+    if (String(url) === "https://files.test/model.glb") return new Response(new Uint8Array(TEST_GLB));
     if (provider === "hyper3d") {
       if (String(url).endsWith("/rodin")) return Response.json({ uuid: "task", jobs: { subscription_key: "task-secret" } }, { status: 201 });
       if (String(url).endsWith("/status")) return Response.json({ jobs: [{ status: "Done" }] });

@@ -161,3 +161,11 @@ and [Hyper3D Rodin](https://docs.hyper3d.ai/en/api-specification/rodin-gen2-5).
 Rodin Agentic uses a separate beta endpoint and response contract; it is not
 a tier for the current Rodin adapter. Bang, retexturing, rigging, and image
 generation APIs likewise are not additional image-to-3D model versions.
+
+## 3D operations
+
+Model 3D supports image/text generation, retexturing and Meshy/Tripo remeshing.
+Animate 3D selects Meshy or Tripo independently of generation-model visibility.
+Compatible custom connections opt into additional operations in their 3D capability
+settings. See [3D provider workflows](3d-providers.md) for operation inputs, rig and
+texture versions, task recovery, GLB checks and the remaining documented APIs.

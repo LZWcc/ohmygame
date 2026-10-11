@@ -5793,6 +5793,8 @@ button.home-nav-item-active:hover {
   height: 52px;
   place-items: center;
   border-radius: 9px;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
 }
 
 .plugin-row-copy {
@@ -6061,11 +6063,6 @@ button.home-nav-item-active:hover {
   .plugins-installed-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.plugin-row-icon-media {
-  background: #1c302b;
-  color: var(--accent);
 }
 
 .plugin-row-icon-godot {
@@ -7948,6 +7945,15 @@ button {
   gap: 6px;
 }
 
+.story-media-controls.is-3d {
+  flex-wrap: wrap;
+}
+
+.story-media-controls.is-3d > .canvas-chip {
+  max-width: 180px;
+  flex-shrink: 0;
+}
+
 .story-media-controls button:not(.canvas-chip) {
   display: grid;
   width: 30px;
@@ -8140,6 +8146,14 @@ button {
   padding: 0 14px 8px;
 }
 
+.story-animation-picker-note {
+  margin: 0;
+  padding: 0 14px 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .story-animation-picker-grid {
   display: grid;
   min-height: 180px;
@@ -8205,6 +8219,40 @@ button {
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.story-animation-picker-grid.is-list {
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+}
+
+.story-animation-picker-grid > .story-animation-picker-text-move {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 38px;
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.story-animation-picker-text-move strong {
+  white-space: normal;
+  line-height: 16px;
+}
+
+.story-animation-picker-selection {
+  display: grid;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: #fff;
+}
+
+[aria-pressed="true"] > .story-animation-picker-selection {
+  border-color: var(--theme-accent);
+  background: var(--theme-accent);
 }
 
 .story-animation-picker-preview {
@@ -8273,6 +8321,12 @@ button {
   cursor: pointer;
   font: inherit;
   font-size: 12px;
+}
+
+@media (max-width: 640px) {
+  .story-animation-picker > footer { flex-wrap: wrap; }
+  .story-animation-picker > footer > span { flex: 1; white-space: normal; }
+  .story-animation-picker-selected { order: 1; flex-basis: 100%; }
 }
 
 .story-video-picker-list {
@@ -8390,6 +8444,24 @@ button {
 }
 
 .story-canvas-pan .react-flow__pane.dragging {
+  cursor: grabbing;
+}
+
+.story-canvas .react-flow__node.draggable {
+  cursor: default;
+}
+
+.story-canvas .react-flow__node.draggable.dragging {
+  cursor: grabbing;
+}
+
+/* A single marquee node stays clickable; the overlay is for moving groups. */
+.interactive-story-canvas.has-single-selection .react-flow__nodesselection {
+  display: none;
+}
+
+.story-canvas .react-flow__nodesselection-rect:active,
+.story-canvas:has(.react-flow__node.dragging) .react-flow__nodesselection-rect {
   cursor: grabbing;
 }
 
@@ -14204,10 +14276,6 @@ button {
 
 :root[data-appearance="light"] .plugin-switch[aria-checked="true"] {
   border-color: var(--settings-switch-accent);
-}
-
-:root[data-appearance="light"] .plugin-row-icon-media {
-  background: #ececec;
 }
 
 :root[data-appearance="light"] .plugin-row-icon-godot {

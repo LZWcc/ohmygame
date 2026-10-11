@@ -69,6 +69,7 @@ export function CanvasTableNode({
     tableRuntime?: TableNodeRuntime;
     resizeRuntime?: CanvasNodeResizeRuntime;
     nodeDetails?: CanvasNodeDetails;
+    panelOpen?: boolean;
   };
   selected?: boolean;
 }) {
@@ -134,7 +135,7 @@ export function CanvasTableNode({
           </div>
         </footer>
       </div>
-      {selected && table && runtime ? (
+      {data.panelOpen && table && runtime ? (
         <div className="canvas-node-auxiliary">
           <CanvasTableAI
             table={table}

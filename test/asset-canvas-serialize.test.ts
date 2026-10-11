@@ -4,6 +4,8 @@ import { canvasHistoryKey, model3DViewLabels, toAssetCanvasNode } from "../src/r
 import type { Model3DModel } from "../src/shared/contracts.js";
 import { model3DModel } from "../src/shared/custom-models.js";
 import { MODEL_3D_PRESETS } from "../src/shared/model3d-presets.js";
+import { buildModel3DToolRequest } from "../src/shared/generation-config.js";
+import { MODEL3D_CONNECTION_ID } from "../src/shared/model3d-operations.js";
 
 describe("Asset Canvas node serialization", () => {
   it("keeps resize history and serialization while rejecting invalid node dimensions", () => {
@@ -65,5 +67,59 @@ describe("Asset Canvas node serialization", () => {
     const node = toAssetCanvasNode({ id: "node", type, position: { x: 0, y: 0 }, title: "Player", description: "Main character", data: { documentId: "rules", assetId: "reference", text: "Rules", nodeDetails: { title: "Runtime name", label: "Runtime label", edit: () => {} } } });
     expect(node).toMatchObject({ title: "Player", description: "Main character" });
     expect(node.data).not.toHaveProperty("nodeDetails");
+  });
+});
+
+describe("3D processing node serialization", () => {
+  it.each(["meshy", "tripo"])("uses %s remesh limits for a native connection saved without runtime catalog data", (provider) => {
+    const node = toAssetCanvasNode({ id: "remesh", type: "model-3d", position: { x: 0, y: 0 }, data: {
+      model3DOperation: "remesh", model3DSource: { type: "library", assetId: "source" }, images: [],
+      model3DConfig: { model: { provider, id: MODEL3D_CONNECTION_ID }, targetPolycount: 500_000, texture: true, pbr: false },
+    } });
+    if (node.type !== "model-3d") throw new Error("Expected model node");
+    expect(node.data.targetPolycount).toBe(provider === "meshy" ? 30_000 : 500_000);
+    expect(buildModel3DToolRequest(node.data, [], node.data.operation).targetPolycount).toBe(node.data.targetPolycount);
+  });
+  it("keeps remesh face counts above the geometry model's generation limit in saved requests", () => {
+    const node = toAssetCanvasNode({ id: "remesh", type: "model-3d", position: { x: 0, y: 0 }, data: {
+      model3DOperation: "remesh", model3DSource: { type: "library", assetId: "source" }, images: [],
+      model3DConfig: { model: { provider: "tripo", id: "P1-20260311" }, targetPolycount: 300_000, texture: true, pbr: false },
+    } });
+    if (node.type !== "model-3d") throw new Error("Expected model node");
+    const saved = JSON.parse(JSON.stringify(node.data));
+    expect(saved.targetPolycount).toBe(300_000);
+    expect(buildModel3DToolRequest(saved, [], saved.operation).targetPolycount).toBe(300_000);
+  });
+  it("keeps source, prompt links and operation versions in history and clipboard", async () => {
+    const { createCanvasClipboard, duplicateCanvasSelection, parseCanvasClipboard } = await import("../src/renderer/asset-canvas-clipboard.js");
+    const source = toAssetCanvasNode({ id: "source", type: "model-3d", position: { x: 0, y: 0 }, data: { images: [] } });
+    const text = toAssetCanvasNode({ id: "style", type: "text", position: { x: 0, y: 200 }, data: { text: "Gold" } });
+    const node = toAssetCanvasNode({ id: "texture", type: "model-3d", position: { x: 300, y: 0 }, data: {
+      model3DConfig: { model: { provider: "tripo", id: "P1-20260311" }, targetPolycount: 4000, texture: true, pbr: true },
+      model3DOperation: "retexture", model3DSource: { type: "node", nodeId: "source" }, prompt: "Worn metal", promptSource: { type: "node", nodeId: "style" },
+      model3DOptions: { textureModel: "v3.5-20260815", textureQuality: "detailed" }, images: [],
+    } });
+    expect(node.data).toMatchObject({ operation: "retexture", source: { nodeId: "source" }, promptSource: { nodeId: "style" }, options: { textureModel: "v3.5-20260815" } });
+    const value = createCanvasClipboard("project", [source, text, node], []);
+    expect(parseCanvasClipboard(JSON.stringify(value))).toBeDefined();
+    let next = 0;
+    const copy = duplicateCanvasSelection(value.nodes, [], { x: 500, y: 0 }, () => `copy-${++next}`);
+    expect(copy.nodes[2]!.data).toMatchObject({ source: { nodeId: "copy-1" }, promptSource: { nodeId: "copy-2" }, operation: "retexture" });
+  });
+  it("keeps Tripo string IDs and provider/rig options without changing legacy Meshy nodes", () => {
+    const node = toAssetCanvasNode({ id: "animation", type: "animate-3d", position: { x: 0, y: 0 }, data: {
+      images: [{ type: "library", assetId: "character" }], animationModel: { provider: "tripo", id: "P1-20260311" },
+      actionIds: ["preset:quadruped:walk"], model3DOptions: { rigModel: "v2.5-20260210", rigType: "quadruped", animateInPlace: true },
+    } });
+    const canvas = createAssetCanvasDocument(); canvas.nodes = [node]; canvas.editorLayout.nodes = { animation: node.position };
+    expect(isAssetCanvasDocument(canvas)).toBe(true);
+    expect(node.data).toMatchObject({ model: { provider: "tripo" }, actionIds: ["preset:quadruped:walk"], options: { rigModel: "v2.5-20260210" } });
+    const legacy = toAssetCanvasNode({ id: "legacy", type: "animate-3d", position: { x: 0, y: 0 }, data: { actionIds: [0, 30] } });
+    expect(legacy.data).not.toHaveProperty("model"); expect(legacy.data).toMatchObject({ actionIds: [0, 30] });
+  });
+  it("removes processing model connections when the source node is deleted", async () => {
+    const { removeNodesAndReferences } = await import("../src/renderer/asset-canvas-workspace.js");
+    const result = removeNodesAndReferences([{ id: "texture", type: "model-3d", position: { x: 0, y: 0 }, data: { model3DSource: { type: "node", nodeId: "source" }, model3DOperation: "retexture" } }], new Set(["source"]));
+    expect(result[0]!.data.model3DSource).toBeUndefined();
   });
 });

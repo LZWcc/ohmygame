@@ -1,3 +1,4 @@
+import { protocolOperations } from "../shared/model3d-operations.js";
 import { useState } from "react";
 import {
   IMAGE_ASPECT_RATIOS, IMAGE_RESOLUTIONS, IMAGE_OUTPUT_COUNTS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS,
@@ -67,7 +68,7 @@ export function Model3DSettingsFields({ value, onChange, lockCapabilities = fals
   lockCapabilities?: boolean; lockProtocol?: boolean; showEndpoint?: boolean;
 }) {
   const limit = value.protocol === "hyper3d" ? 2_000_000 : value.protocol === "tripo" ? 1_500_000 : 300_000;
-  const minimum = value.protocol === "hyper3d" ? 500 : 100;
+  const minimum = value.protocol === "hyper3d" ? 500 : value.protocol === "tripo" ? 48 : 100;
   const defaults = value.defaults ?? { texture: value.supportsTexture, pbr: false };
   function update(patch: Partial<CustomModel3DSettings>) {
     const next = { ...value, ...patch };
@@ -105,6 +106,7 @@ export function Model3DSettingsFields({ value, onChange, lockCapabilities = fals
           <label><input type="checkbox" checked={value.supportsTexture} onChange={(event) => update({ supportsTexture: event.target.checked, supportsPbr: event.target.checked && value.supportsPbr })} />Texture support</label>
           <label><input type="checkbox" checked={value.supportsPbr} disabled={!value.supportsTexture} onChange={(event) => update({ supportsPbr: event.target.checked })} />PBR support</label>
         </div>
+        {!lockCapabilities ? <ChoiceFields label="Compatible 3D operations" options={protocolOperations(value.protocol).filter((operation) => operation !== "image")} value={value.operations ?? []} onChange={(operations) => update({ operations })} /> : null}
       </fieldset>
     </details>
   </div>;

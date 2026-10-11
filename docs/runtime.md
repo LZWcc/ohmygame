@@ -31,7 +31,8 @@ the daemon address plus a random process-scoped token through the isolated
 preload bridge. The renderer has no Node.js access.
 
 Bun 1.4.2 installs dependencies and executes builds, tests, and most preparation
-scripts. Pinned Plugin archives use Node to preserve their locked ZIP checksums;
+scripts. Pinned Plugin archives are prepared with Node and store their entries
+uncompressed, so their locked ZIP checksums do not depend on the zlib build;
 desktop runtime preparation uses Node and its built-in environment-file loader.
 Standalone daemon development and `bun run start` use Node.js 22.19+
 explicitly; desktop development and packaged apps run the daemon with
@@ -122,6 +123,15 @@ Pi runs in trusted-local mode. The workspace is Pi's working directory, but
 `cwd` is not an operating-system security boundary, and enabled Pi tools run
 without an OhMyGame approval prompt. Provider credentials stay in the daemon
 and are never written to workspaces or returned to the renderer.
+
+The desktop app writes the daemon's access token to the daemon's stdin, not
+to its environment, which other processes of the same user can read. A daemon
+started on its own may be given the token in `OHMYGAME_DAEMON_TOKEN`; it
+removes the variable at startup, though the original environment may still
+be visible in process listings. Either way no process the daemon starts
+inherits the token: preview servers, dependency installs, publish builds, the
+Agent's shell, stdio MCP servers, and Git. Project processes also run without
+the daemon's other settings (`OHMYGAME_*`, `DAEMON_HOST`, `DAEMON_PORT`).
 
 ## Agent game use
 
