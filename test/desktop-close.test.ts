@@ -78,7 +78,7 @@ beforeEach(async () => {
   process.argv.push("--built-renderer");
   host.quit.mockImplementation(() => host.appEvents.get("before-quit")!({ preventDefault() {} }));
   await import("../src/desktop/main.js");
-  expect(host.options?.rendererFile).toMatch(/renderer\/index.html$/);
+  expect(host.options?.rendererFile).toMatch(/[\\/]renderer[\\/]index\.html$/);
 });
 afterEach(() => { process.argv.splice(process.argv.lastIndexOf("--built-renderer"), 1); vi.useRealTimers(); });
 

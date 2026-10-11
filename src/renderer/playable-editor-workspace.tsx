@@ -26,6 +26,7 @@ import {
   type Edge,
   type EdgeChange,
   type NodeChange,
+  type ReactFlowInstance,
 } from "@xyflow/react";
 import { snapCanvasPosition } from "./canvas-alignment.js";
 import { EditorCanvas, isTextEntry, undoShortcut, type CanvasContextMenuState } from "./editor-canvas.js";
@@ -71,6 +72,7 @@ import { buildCodebase, createFlowNode, nodeIdForIssuePath, nodeSourcePaths, toF
 import { PLAYABLE_NODE_TYPES, PlayableCanvasContext } from "./playable-node-card.js";
 import { PlayableAddControl, PlayableCanvasContextMenu, PlayableEmptyCanvas } from "./playable-canvas-menus.js";
 import { WorkspaceTabs, type WorkspaceTabOption } from "./workspace-tabs.js";
+import { useDesktopSave } from "./desktop-close-guard.js";
 
 const DEFAULT_CANVAS_VIEWPORT = { x: 64, y: 32, zoom: 1 };
 const CanvasWorkspace = lazy(() => import("./canvas-workspace.js").then((module) => ({ default: module.CanvasWorkspace })));
@@ -163,6 +165,7 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
   const [playtesting, setPlaytesting] = useState(false);
   const [writing, setWriting] = useState(false);
   const latestCodebase = useRef<NodeCodebase | undefined>(undefined);
+  const canvas = useRef<ReactFlowInstance<PlayableFlowNode, Edge>>(null);
   /** What the editor last read from or wrote to disk, and the revision a save has to start from. */
   const diskCodebase = useRef<{ codebase: NodeCodebase; revision: string } | undefined>(undefined);
   /** Counts the versions loaded from disk, so a save queued before a load is not written over it. */
@@ -570,6 +573,14 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
     );
     return operation;
   }, [projectId]);
+
+  useDesktopSave(async () => {
+    const pending = latestCodebase.current;
+    if (!pending) return saveChain.current;
+    // React Flow delays onMoveEnd while scrolling; read the displayed view on close.
+    const viewport = workspaceView === "canvas" && !designOpen ? canvas.current?.getViewport() : undefined;
+    await save(viewport ? { ...pending, editorLayout: { ...pending.editorLayout, viewport } } : pending);
+  });
 
   useEffect(() => {
     if (phase !== "ready" || !codebase) return;
@@ -1033,6 +1044,7 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
               <EditorCanvas<PlayableFlowNode>
                 nodes={renderedNodes}
                 edges={renderedEdges}
+                onInit={(instance) => { canvas.current = instance; }}
                 nodeTypes={PLAYABLE_NODE_TYPES}
                 addControl={<PlayableAddControl
                   presets={presets}

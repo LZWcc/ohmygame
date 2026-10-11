@@ -786,6 +786,14 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   const flush = useCallback(async () => {
     await pendingImport.current;
     await operationChain.current.catch(() => {});
+    // A close can precede React Flow's delayed onMoveEnd callback.
+    const current = latestCanvas.current;
+    const viewport = flowInstance.current?.getViewport();
+    if (current && viewport && phase === "ready") {
+      const editorLayout = { ...current.editorLayout, viewport };
+      latestCanvas.current = { ...current, editorLayout };
+      setEditorLayout(editorLayout);
+    }
     while (latestCanvas.current && phase === "ready") {
       const submitted = latestCanvas.current;
       await save(submitted);
