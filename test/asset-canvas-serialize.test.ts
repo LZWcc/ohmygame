@@ -5,6 +5,7 @@ import type { Model3DModel } from "../src/shared/contracts.js";
 import { model3DModel } from "../src/shared/custom-models.js";
 import { MODEL_3D_PRESETS } from "../src/shared/model3d-presets.js";
 import { buildModel3DToolRequest } from "../src/shared/generation-config.js";
+import { MODEL3D_CONNECTION_ID } from "../src/shared/model3d-operations.js";
 
 describe("Asset Canvas node serialization", () => {
   it("keeps resize history and serialization while rejecting invalid node dimensions", () => {
@@ -70,6 +71,15 @@ describe("Asset Canvas node serialization", () => {
 });
 
 describe("3D processing node serialization", () => {
+  it.each(["meshy", "tripo"])("uses %s remesh limits for a native connection saved without runtime catalog data", (provider) => {
+    const node = toAssetCanvasNode({ id: "remesh", type: "model-3d", position: { x: 0, y: 0 }, data: {
+      model3DOperation: "remesh", model3DSource: { type: "library", assetId: "source" }, images: [],
+      model3DConfig: { model: { provider, id: MODEL3D_CONNECTION_ID }, targetPolycount: 500_000, texture: true, pbr: false },
+    } });
+    if (node.type !== "model-3d") throw new Error("Expected model node");
+    expect(node.data.targetPolycount).toBe(provider === "meshy" ? 30_000 : 500_000);
+    expect(buildModel3DToolRequest(node.data, [], node.data.operation).targetPolycount).toBe(node.data.targetPolycount);
+  });
   it("keeps remesh face counts above the geometry model's generation limit in saved requests", () => {
     const node = toAssetCanvasNode({ id: "remesh", type: "model-3d", position: { x: 0, y: 0 }, data: {
       model3DOperation: "remesh", model3DSource: { type: "library", assetId: "source" }, images: [],

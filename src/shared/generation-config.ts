@@ -1,8 +1,8 @@
-import { type Model3DGenerationConfig, type Model3DModel, type Model3DOperation, type PromptImage, type Run3DToolRequest } from "./contracts.js";
-import { remeshPolycount } from "./model3d-operations.js";
+import { type Model3DGenerationConfig, type Model3DModel, type Model3DModelRef, type Model3DOperation, type PromptImage, type Run3DToolRequest } from "./contracts.js";
+import { MODEL3D_CONNECTION_ID, remeshPolycount } from "./model3d-operations.js";
 import { BUILTIN_CLOUD_CATALOG, cloudModelId } from "./cloud-models.js";
 import { model3DModel } from "./custom-models.js";
-import { MODEL_3D_PRESETS, NATIVE_3D_PROVIDER_NAMES, type Native3DProviderId } from "./model3d-presets.js";
+import { isNative3DProvider, MODEL_3D_PRESETS, NATIVE_3D_PROVIDER_NAMES, type Native3DProviderId } from "./model3d-presets.js";
 
 export const DEFAULT_IMAGE_NODE_CONFIG = { resolution: "1K", aspectRatio: "1:1" } as const;
 export const DEFAULT_VIDEO_NODE_CONFIG = { resolution: "720p", aspectRatio: "adaptive", duration: 6 } as const;
@@ -28,6 +28,14 @@ export function resolveModel3D(model: unknown, models: readonly Model3DModel[] =
     ?? (canonicalId !== id ? models.find((candidate) => candidate.provider === provider && candidate.id === canonicalId) : undefined);
 }
 
+/** Older boards name a geometry version where processing now selects its native connection. */
+export function resolveModel3DConnection(ref: Model3DModelRef | undefined, models: readonly Model3DModel[]): Model3DModel | undefined {
+  if (!ref) return models[0];
+  if (typeof ref.provider !== "string" || typeof ref.id !== "string") return undefined;
+  return models.find((model) => model.provider === ref.provider && model.id === ref.id)
+    ?? (isNative3DProvider(ref.provider) ? models.find((model) => model.provider === ref.provider && model.id === MODEL3D_CONNECTION_ID) : undefined);
+}
+
 /** Meshy rejects animation requests with more library actions than this; larger sets are split across requests. */
 export const ANIMATION_ACTIONS_PER_REQUEST = 10;
 /** Every request reuses one rig and the results are merged into a single GLB, so this only bounds spend per run. */
@@ -44,7 +52,9 @@ export const DEFAULT_MODEL_3D_CONFIG: Model3DGenerationConfig = {
 
 export function normalizeModel3DConfig(value: Partial<Model3DGenerationConfig> | undefined, model?: Model3DModel, operation: Model3DOperation = "image"): Model3DGenerationConfig {
   const texture = model?.supportsTexture === false ? false : value?.texture ?? model?.defaults?.texture ?? DEFAULT_MODEL_3D_CONFIG.texture;
-  const polycount = operation === "remesh" ? remeshPolycount((model ?? resolveModel3D(value?.model))?.protocol) : model?.polycount ?? resolveModel3D(value?.model)?.polycount ?? (value?.model
+  const selected = model ?? resolveModel3D(value?.model);
+  const protocol = selected?.protocol ?? (value?.model?.id === MODEL3D_CONNECTION_ID && isNative3DProvider(value.model.provider) ? value.model.provider : undefined);
+  const polycount = operation === "remesh" ? remeshPolycount(protocol) : selected?.polycount ?? (value?.model
     ? { min: 100, max: MODEL_3D_MAX_POLYCOUNT, default: DEFAULT_MODEL_3D.polycount.default } : DEFAULT_MODEL_3D.polycount);
   const targetPolycount = value?.targetPolycount;
   return {

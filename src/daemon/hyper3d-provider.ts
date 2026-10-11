@@ -24,7 +24,7 @@ export class Hyper3DProvider implements Model3DGenerator {
     if (operation === "retexture" && (!input.source?.length || input.images.length !== 1)) throw new Model3DGenerationError("Hyper3D retexture requires one source GLB and one reference image", 400);
     if (operation === "image" && (!input.images.length || input.images.length > model.maxReferenceImages)) throw new Model3DGenerationError(`Provide 1 to ${model.maxReferenceImages} reference images`, 400);
     const faces = input.targetPolycount ?? model.polycount.default;
-    if (!Number.isInteger(faces) || faces < model.polycount.min || faces > model.polycount.max) throw new Model3DGenerationError(`Hyper3D face count must be between ${model.polycount.min} and ${model.polycount.max}`, 400);
+    if (operation !== "retexture" && (!Number.isInteger(faces) || faces < model.polycount.min || faces > model.polycount.max)) throw new Model3DGenerationError(`Hyper3D face count must be between ${model.polycount.min} and ${model.polycount.max}`, 400);
     const texture = input.texture ?? model.defaults?.texture ?? model.supportsTexture;
     const pbr = texture && (input.pbr ?? model.defaults?.pbr ?? false);
     if (texture && !model.supportsTexture || pbr && !model.supportsPbr) throw new Model3DGenerationError("The selected model does not support these texture options", 400);

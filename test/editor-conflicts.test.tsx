@@ -4,9 +4,12 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Node } from "@xyflow/react";
+import { ReactFlowProvider } from "@xyflow/react";
 import type { EditorCanvas } from "../src/renderer/editor-canvas.js";
 import type { ProjectState } from "../src/shared/contracts.js";
 import { createAssetCanvasDocument } from "../src/shared/asset-canvas.js";
+import { MODEL_3D_MODELS } from "../src/shared/generation-config.js";
+import { MODEL3D_CONNECTION_ID } from "../src/shared/model3d-operations.js";
 import type { CanvasBoardDetail } from "../src/shared/canvas-workspace.js";
 import type {
   NodeCodebaseDetail,
@@ -19,6 +22,8 @@ type FlowNode = Node & { title?: string };
 type CanvasProps = Parameters<typeof EditorCanvas<FlowNode>>[0];
 const captured = { props: undefined as CanvasProps | undefined };
 const api = {
+  model3DOperations: vi.fn(),
+  animationActions: vi.fn(),
   getBoard: vi.fn<() => Promise<CanvasBoardDetail>>(),
   saveBoard:
     vi.fn<
@@ -40,7 +45,10 @@ vi.doMock(path.resolve("src/renderer/editor-canvas.tsx"), async (original) => ({
   ...(await original<typeof import("../src/renderer/editor-canvas.js")>()),
   EditorCanvas: (props: CanvasProps) => {
     captured.props = props;
-    return <div />;
+    return <ReactFlowProvider>{props.nodes.filter((node) => node.type === "animate-3d").map((node) => {
+      const Component = props.nodeTypes![node.type!];
+      return <Component key={node.id} {...node} type={node.type!} selected dragging={false} draggable selectable deletable zIndex={0} isConnectable positionAbsoluteX={node.position.x} positionAbsoluteY={node.position.y} />;
+    })}</ReactFlowProvider>;
   },
 }));
 vi.doMock(
@@ -55,7 +63,9 @@ vi.doMock(path.resolve("src/renderer/api.ts"), async (original) => ({
   listImageModelCatalog: async () => ({ models: [], providers: [] }),
   listVideoModelCatalog: async () => ({ models: [], providers: [] }),
   listModel3DCatalog: async () => ({ models: [], providers: [] }),
-  listModel3DOperations: async () => [],
+  listModel3DOperations: api.model3DOperations,
+  listModel3DAnimations: api.animationActions,
+  model3DBalance: async () => ({ balance: 123 }),
   listPlayablePresets: async () => ({ presets: [] }),
   listPlayableThumbnails: async () => ({}),
   getPlayableValidation: async () => ({ issues: [] }),
@@ -98,6 +108,8 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
   captured.props = undefined;
+  api.model3DOperations.mockResolvedValue([]);
+  api.animationActions.mockResolvedValue([{ id: 0, name: "Idle", category: "Daily", subCategory: "Idle" }]);
   const canvas = createAssetCanvasDocument();
   canvas.nodes = [
     {
@@ -147,6 +159,27 @@ afterEach(async () => {
 });
 const advance = (milliseconds: number) =>
   act(async () => vi.advanceTimersByTimeAsync(milliseconds));
+it("loads moves only when a picker opens and retries errors using legacy native connection references", async () => {
+  api.model3DOperations.mockResolvedValue([{ ...MODEL_3D_MODELS[0]!, id: MODEL3D_CONNECTION_ID, name: "Meshy", operations: ["animate"] }]);
+  boardDisk.board.nodes = ["first", "second"].map((id) => ({ id, type: "animate-3d", title: "Original", position: { x: 0, y: 0 },
+    data: { model: { provider: "meshy", id: "meshy-7.1" }, actionIds: [0], heightMeters: 1.7 } }));
+  api.animationActions.mockRejectedValueOnce(new Error("offline"));
+  await openCanvas("asset-canvas");
+  expect(api.animationActions).not.toHaveBeenCalled();
+  expect(container.querySelectorAll('[aria-label="Animation provider: Meshy"]')).toHaveLength(2);
+  const moves = [...container.querySelectorAll("button")].find((button) => button.textContent === "1 move")!;
+  await act(async () => moves.click());
+  expect(api.animationActions).toHaveBeenCalledTimes(1);
+  expect(api.animationActions).toHaveBeenCalledWith({ provider: "meshy", id: MODEL3D_CONNECTION_ID }, undefined);
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.textContent).toContain("Could not load moves");
+  const retry = [...dialog.querySelectorAll("button")].find((button) => button.textContent === "Try again")!;
+  await act(async () => retry.click());
+  expect(api.animationActions).toHaveBeenCalledTimes(2);
+  expect(dialog.textContent).toContain("Idle");
+  await act(async () => (dialog.querySelector('[aria-label="Close move picker"]') as HTMLButtonElement).click());
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
 async function openCanvas(type: "web-game" | "asset-canvas") {
   const storage = createCanvasBoardStorage({
     projectId: "p",

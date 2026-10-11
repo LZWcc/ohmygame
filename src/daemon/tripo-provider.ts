@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import type { CustomModel3DSettings, Model3DBalance, Model3DOptions } from "../shared/contracts.js";
 import { model3DPreset } from "../shared/model3d-presets.js";
-import { tripoActions } from "../shared/model3d-operations.js";
+import { remeshPolycount, tripoActions } from "../shared/model3d-operations.js";
 import { MAX_ANIMATION_ACTIONS } from "../shared/generation-config.js";
 import type { ImageSource } from "./image-adapters.js";
 import { Model3DGenerationError, readModel3DResult, type Generated3DModel, type Model3DGenerationInput, type Model3DAnimationInput, type Model3DExecution, type Model3DGenerator } from "./model3d.js";
@@ -21,9 +21,9 @@ export class TripoProvider implements Model3DGenerator {
     if (input.options?.textureQuality === "fast" && input.options?.textureModel && input.options.textureModel !== "v3.5-20260815") throw new Model3DGenerationError("Fast textures require Tripo v3.5", 400);
     if (operation === "image" && (!input.images.length || input.images.length > model.maxReferenceImages)) throw new Model3DGenerationError(`Provide 1 to ${model.maxReferenceImages} reference images`, 400);
     if (operation === "text" && (input.images.length || !input.prompt?.trim() || input.prompt.length > 1024)) throw new Model3DGenerationError("Tripo text generation needs a prompt up to 1024 characters", 400);
-    const faces = input.targetPolycount ?? model.polycount.default;
-    const minimum = operation === "remesh" ? 100 : model.polycount.min, maximum = operation === "remesh" ? 1_500_000 : model.polycount.max;
-    if (!Number.isInteger(faces) || faces < minimum || faces > maximum) throw new Model3DGenerationError(`Tripo face count must be between ${minimum} and ${maximum}`, 400);
+    const polycount = operation === "remesh" ? remeshPolycount("tripo") : model.polycount;
+    const faces = input.targetPolycount ?? polycount.default;
+    if (operation !== "retexture" && (!Number.isInteger(faces) || faces < polycount.min || faces > polycount.max)) throw new Model3DGenerationError(`Tripo face count must be between ${polycount.min} and ${polycount.max}`, 400);
     const texture = input.texture ?? model.defaults?.texture ?? model.supportsTexture;
     const pbr = texture && (input.pbr ?? model.defaults?.pbr ?? false);
     if (texture && !model.supportsTexture || pbr && !model.supportsPbr) throw new Model3DGenerationError("The selected 3D model does not support these texture options", 400);

@@ -104,8 +104,8 @@ import { findAssetCanvasCoverSource, type AssetCanvasCoverSource } from "../shar
 import { ModelPreview } from "./model-preview.js";
 import { LibraryAssetPicker } from "./node-workbench.js";
 import { AssetDialogShell, AssetMedia, type AssetMediaType } from "./asset-gallery.js";
-import { DEFAULT_IMAGE_NODE_CONFIG, DEFAULT_MODEL_3D_CONFIG, DEFAULT_ANIMATION_ACTION_IDS, DEFAULT_CHARACTER_HEIGHT_METERS, DEFAULT_VIDEO_NODE_CONFIG, MAX_ANIMATION_ACTIONS, MODEL_3D_MAX_REFERENCE_IMAGES, normalizeModel3DConfig, resolveModel3D } from "../shared/generation-config.js";
-import { remeshPolycount } from "../shared/model3d-operations.js";
+import { DEFAULT_IMAGE_NODE_CONFIG, DEFAULT_MODEL_3D_CONFIG, DEFAULT_ANIMATION_ACTION_IDS, DEFAULT_CHARACTER_HEIGHT_METERS, DEFAULT_VIDEO_NODE_CONFIG, MAX_ANIMATION_ACTIONS, MODEL_3D_MAX_REFERENCE_IMAGES, normalizeModel3DConfig, resolveModel3D, resolveModel3DConnection } from "../shared/generation-config.js";
+import { MODEL3D_CONNECTION_ID, remeshPolycount } from "../shared/model3d-operations.js";
 import { mergeCanvasDocument } from "../shared/canvas-workspace.js";
 import { CanvasDocumentNode, ExpandedCanvasDocument, type CanvasDocuments, type DocumentNodeRuntime } from "./canvas-document-node.js";
 import { CanvasNodeLabel, type CanvasNodeDetails } from "./canvas-node-label.js";
@@ -259,6 +259,8 @@ interface ReferenceMediaNodeRuntime extends MediaNodeRuntime {
   onAddLibraryReference?: (asset: LibraryAsset) => void;
 }
 
+type ReferenceStripRuntime = Omit<ReferenceMediaNodeRuntime, "generating" | "error" | "onChange" | "onGenerate" | "onCancel">;
+
 interface ImageNodeRuntime extends ReferenceMediaNodeRuntime {
   models: ImageModel[];
   providers: MediaProviderStatus[];
@@ -270,19 +272,13 @@ interface VideoNodeRuntime extends ReferenceMediaNodeRuntime {
 }
 
 interface Model3DNodeRuntime extends ReferenceMediaNodeRuntime {
-  sourceRuntime?: ReferenceMediaNodeRuntime;
-  operationModels: Model3DModel[];
+  sourceRuntime?: ReferenceStripRuntime;
   models: Model3DModel[];
   providers: MediaProviderStatus[];
 }
 
 interface Animate3DNodeRuntime extends ReferenceMediaNodeRuntime {
   models: Model3DModel[];
-  actions: Model3DAnimationAction[];
-  actionsStatus: "loading" | "ready" | "error";
-  /** Whether a 3D provider is set up; without one the action library is empty. */
-  configured: boolean;
-  onReloadActions: () => void;
 }
 
 interface MediaReferenceView {
@@ -1356,11 +1352,10 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
             libraryImages,
             onAddLibraryReference: (asset: LibraryAsset) => addLibraryReference(node, asset),
             models: availableModels,
-            operationModels: operationModels3D,
             linkedPrompt: resolveLinkedPrompt(node, nodes, documents),
             onDisconnectPrompt: () => setNodes((current) => current.map((candidate) => candidate.id === node.id ? { ...candidate, data: { ...candidate.data, promptSource: undefined } } : candidate)),
             sourceRuntime: {
-              generating: nodeJob?.status === "running", busy: nodeJob?.status === "running", onChange: () => {}, onGenerate: () => {},
+              busy: nodeJob?.status === "running",
               references: modelReferenceViews(node, nodes, libraryAssets), maxReferences: 1, slotLabels: ["Source model"], uploading: false, accept: "", addLabel: "Connect a source GLB model",
               onRemoveReference: () => setNodes((current) => current.map((candidate) => candidate.id === node.id ? { ...candidate, data: { ...candidate.data, model3DSource: undefined } } : candidate)),
             },
@@ -1395,8 +1390,6 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
               ? { ...candidate, data: { ...candidate.data, images: [] } }
               : candidate)),
             models: operationModels3D.filter((model) => model.operations?.includes("animate")),
-            actions: [], actionsStatus: "loading", configured: operationModels3D.some((model) => model.operations?.includes("animate")),
-            onReloadActions: () => {},
           } satisfies Animate3DNodeRuntime,
         },
       };
@@ -1812,7 +1805,7 @@ function Model3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "d
   const auth = useAuth();
   const runtime = data.model3DRuntime;
   const config = nodeModel3DConfig({ type: "model-3d", data });
-  const selectedModel = resolveModel3D(config.model, runtime?.models ?? []);
+  const selectedModel = nodeModel3D({ type: "model-3d", data }, runtime?.models ?? []);
   const provider = runtime?.providers?.find((provider) => provider.provider === (selectedModel?.provider ?? config.model?.provider))
     ?? (!selectedModel && !config.model ? runtime?.providers?.find((provider) => provider.cloud) : undefined);
   const cloud = accountCloudState(provider?.cloud, auth.state.status === "signed-in" ? auth.state.user.id : undefined);
@@ -1825,7 +1818,8 @@ function Model3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "d
   const updateConfig = (next: Partial<Model3DGenerationConfig>) => runtime?.onChange({
     ...data,
     model3DRuntime: undefined,
-    model3DConfig: normalizeModel3DConfig({ ...config, ...next }, resolveModel3D(next.model ?? config.model, runtime.models), operation),
+    model3DConfig: normalizeModel3DConfig({ ...config, ...next }, processing
+      ? resolveModel3DConnection(next.model ?? config.model, runtime.models) : resolveModel3D(next.model ?? config.model, runtime.models), operation),
   });
   return (
     <MediaNodeShell
@@ -1848,8 +1842,8 @@ function Model3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "d
           label={processing ? "Processing connection" : "3D model"}
           wide
           value={selectedModel ? modelRefKey(selectedModel) : undefined}
-          placeholder={runtime?.models.length ? "Select model" : "No 3D model"}
-          options={(runtime?.models ?? []).map((model) => ({ value: modelRefKey(model), label: model.name, group: model.providerName }))}
+          placeholder={processing ? "Select connection" : runtime?.models.length ? "Select model" : "No 3D model"}
+          options={(runtime?.models ?? []).map((model) => ({ value: modelRefKey(model), label: model.name, group: model.id === MODEL3D_CONNECTION_ID ? undefined : model.providerName }))}
           notes={providerNotes(runtime?.providers)}
           action={MANAGE_PROVIDERS}
           disabled={runtime?.busy}
@@ -1906,20 +1900,7 @@ const CHARACTER_HEIGHTS = [1, 1.2, 1.5, 1.7, 1.8, 2];
 
 function Animate3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "data" | "selected">) {
   const runtime = data.animateRuntime;
-  const selectedModel = data.animationModel ? runtime?.models.find((model) => sameModel(model, data.animationModel)) : runtime?.models.find((model) => model.provider === "meshy");
-  const [actionsState, setActionsState] = useState<{ key: string; actions: Model3DAnimationAction[]; status: "loading" | "ready" | "error" }>({ key: "", actions: [], status: "loading" });
-  const [reload, setReload] = useState(0);
-  const key = JSON.stringify([selectedModel?.provider, selectedModel?.id, data.model3DOptions?.rigModel, data.model3DOptions?.rigType]);
-  useEffect(() => {
-    let active = true;
-    if (!selectedModel) return;
-    setActionsState({ key, actions: [], status: "loading" });
-    void listModel3DAnimations({ provider: selectedModel.provider, id: selectedModel.id }, data.model3DOptions)
-      .then((actions) => { if (active) setActionsState({ key, actions, status: "ready" }); })
-      .catch(() => { if (active) setActionsState({ key, actions: [], status: "error" }); });
-    return () => { active = false; };
-  }, [key, reload, selectedModel]);
-  const pickerRuntime = runtime ? { ...runtime, configured: Boolean(selectedModel), actions: actionsState.key === key ? actionsState.actions : [], actionsStatus: actionsState.key === key ? actionsState.status : "loading" as const, onReloadActions: () => setReload((value) => value + 1) } : undefined;
+  const selectedModel = data.animationModel ? resolveModel3DConnection(data.animationModel, runtime?.models ?? []) : runtime?.models.find((model) => model.provider === "meshy");
   const [pickerOpen, setPickerOpen] = useState(false);
   const actionIds = data.actionIds ?? [];
   const height = data.heightMeters ?? DEFAULT_CHARACTER_HEIGHT_METERS;
@@ -1930,7 +1911,7 @@ function Animate3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, 
       <MediaReferenceStrip runtime={runtime} large />
       {runtime?.error ? <p role="alert">{runtime.error}</p> : null}
       <div className="story-media-controls is-3d">
-        <CanvasChipSelect label="Animation provider" value={selectedModel ? modelRefKey(selectedModel) : undefined} placeholder="Select animation provider" options={(runtime?.models ?? []).map((model) => ({ value: modelRefKey(model), label: model.providerName, group: model.name }))} disabled={runtime?.busy} action={MANAGE_PROVIDERS} onChange={(value) => {
+        <CanvasChipSelect label="Animation provider" value={selectedModel ? modelRefKey(selectedModel) : undefined} placeholder="Select animation provider" options={(runtime?.models ?? []).map((model) => ({ value: modelRefKey(model), label: model.name, group: model.id === MODEL3D_CONNECTION_ID ? undefined : model.providerName }))} disabled={runtime?.busy} action={MANAGE_PROVIDERS} onChange={(value) => {
           const model = runtime?.models.find((model) => modelRefKey(model) === value);
           if (model) update({ animationModel: modelRef(model), actionIds: [], model3DOptions: undefined });
         }} />
@@ -1952,9 +1933,10 @@ function Animate3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, 
         <GenerateMediaButton kind="animation" assetId={data.assetId} runtime={runtime} disabled={!selectedModel || !data.images?.length || actionIds.length === 0} />
       </div>
       {selectedModel ? <Model3DBalanceStatus model={selectedModel} /> : null}
-      {pickerOpen && pickerRuntime ? (
+      {pickerOpen && runtime ? (
         <AnimationActionPicker
-          runtime={pickerRuntime}
+          model={selectedModel}
+          options={data.model3DOptions}
           selectedIds={actionIds}
           onChange={(next) => update({ actionIds: next })}
           onClose={() => setPickerOpen(false)}
@@ -1964,12 +1946,27 @@ function Animate3DNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, 
   );
 }
 
-function AnimationActionPicker({ runtime, selectedIds, onChange, onClose }: {
-  runtime: Animate3DNodeRuntime;
+function AnimationActionPicker({ model, options, selectedIds, onChange, onClose }: {
+  model?: Model3DModel;
+  options?: Model3DOptions;
   selectedIds: Model3DActionId[];
   onChange: (actionIds: Model3DActionId[]) => void;
   onClose: () => void;
 }) {
+  const [state, setState] = useState<{ key: string; actions: Model3DAnimationAction[]; status: "loading" | "ready" | "error" }>({ key: "", actions: [], status: "loading" });
+  const [reload, setReload] = useState(0);
+  const key = JSON.stringify([model?.provider, model?.id, options?.rigModel, options?.rigType]);
+  const actions = state.key === key ? state.actions : [];
+  const status = state.key === key ? state.status : "loading";
+  useEffect(() => {
+    let active = true;
+    if (!model) return;
+    setState({ key, actions: [], status: "loading" });
+    void listModel3DAnimations(modelRef(model), options)
+      .then((actions) => { if (active) setState({ key, actions, status: "ready" }); })
+      .catch(() => { if (active) setState({ key, actions: [], status: "error" }); });
+    return () => { active = false; };
+  }, [key, reload, model]);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string>();
   const dialog = useRef<HTMLElement>(null);
@@ -1985,13 +1982,13 @@ function AnimationActionPicker({ runtime, selectedIds, onChange, onClose }: {
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, []);
 
-  const categories = useMemo(() => [...new Set(runtime.actions.map((action) => action.category))], [runtime.actions]);
+  const categories = useMemo(() => [...new Set(actions.map((action) => action.category))], [actions]);
   const visible = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    return runtime.actions.filter((action) => (!category || action.category === category)
+    return actions.filter((action) => (!category || action.category === category)
       && (!normalized || `${action.name} ${action.subCategory}`.toLowerCase().includes(normalized)));
-  }, [runtime.actions, category, query]);
-  const byId = useMemo(() => new Map(runtime.actions.map((action) => [action.id, action])), [runtime.actions]);
+  }, [actions, category, query]);
+  const byId = useMemo(() => new Map(actions.map((action) => [action.id, action])), [actions]);
   const full = selectedIds.length >= MAX_ANIMATION_ACTIONS;
   const toggle = (id: Model3DActionId) => onChange(selectedIds.includes(id) ? selectedIds.filter((candidate) => candidate !== id) : [...selectedIds, id]);
 
@@ -2008,9 +2005,9 @@ function AnimationActionPicker({ runtime, selectedIds, onChange, onClose }: {
           ))}
         </div>
         <div className="story-animation-picker-grid">
-          {!runtime.configured ? <p>Set up an animation provider in <button type="button" onClick={MANAGE_PROVIDERS.onSelect}>Manage providers</button> to browse moves.</p>
-            : runtime.actionsStatus === "loading" ? <p><LoaderCircle className="spin" size={16} /> Loading moves...</p>
-            : runtime.actionsStatus === "error" ? <p>Could not load moves. <button type="button" onClick={runtime.onReloadActions}>Try again</button></p>
+          {!model ? <p>Set up an animation provider in <button type="button" onClick={MANAGE_PROVIDERS.onSelect}>Manage providers</button> to browse moves.</p>
+            : status === "loading" ? <p><LoaderCircle className="spin" size={16} /> Loading moves...</p>
+            : status === "error" ? <p>Could not load moves. <button type="button" onClick={() => setReload((value) => value + 1)}>Try again</button></p>
             : visible.length === 0 ? <p>No moves match your search</p>
             : visible.map((action) => {
               const chosen = selectedIds.includes(action.id);
@@ -2065,7 +2062,7 @@ function MediaPrompt({ kind, value, runtime, onChange }: {
   );
 }
 
-function MediaReferenceStrip({ runtime, large = false }: { runtime?: ReferenceMediaNodeRuntime; large?: boolean }) {
+function MediaReferenceStrip({ runtime, large = false }: { runtime?: ReferenceStripRuntime; large?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const references = runtime?.references ?? [];
@@ -2130,7 +2127,7 @@ function MediaReferenceStrip({ runtime, large = false }: { runtime?: ReferenceMe
   );
 }
 
-function TextReferenceThumbnail({ runtime }: { runtime: MediaNodeRuntime }) {
+function TextReferenceThumbnail({ runtime }: { runtime: Pick<MediaNodeRuntime, "busy" | "linkedPrompt" | "onDisconnectPrompt"> }) {
   const text = runtime.linkedPrompt?.trim() ?? "";
   return (
     <div className="story-media-reference story-text-reference" title={text || "Connected Text node is empty"}>
@@ -3062,6 +3059,7 @@ export function model3DViewLabels(model?: Model3DModel): string[] {
 }
 
 function nodeModel3D(node: Pick<AssetCanvasFlowNode, "type" | "data">, models: readonly Model3DModel[] = node.data.model3DRuntime?.models ?? []): Model3DModel | undefined {
+  if (node.data.model3DOperation === "retexture" || node.data.model3DOperation === "remesh") return resolveModel3DConnection(node.data.model3DConfig?.model, models);
   return resolveModel3D(node.data.model3DConfig?.model, models);
 }
 

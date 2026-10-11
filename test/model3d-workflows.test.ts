@@ -1,7 +1,7 @@
 import { ProjectManager } from "../src/daemon/projects.js";
 import { CanvasStore } from "../src/daemon/canvas-workspace.js";
 import { readCanvasAssets } from "../src/daemon/canvas-assets.js";
-import { mkdtemp, rm, readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { NodeIO } from "@gltf-transform/core";
@@ -17,6 +17,10 @@ import { ToolRunner } from "../src/daemon/tools.js";
 import { AssetLibrary } from "../src/daemon/asset-library.js";
 import { MODEL_3D_PRESETS } from "../src/shared/model3d-presets.js";
 import { normalizeModelUsages } from "../src/shared/custom-models.js";
+import { normalizeCustomProviderModel } from "../src/daemon/provider-model-settings.js";
+import type { CustomProviderDetails } from "../src/shared/contracts.js";
+import { MODEL3D_CONNECTION_ID } from "../src/shared/model3d-operations.js";
+import { resolveModel3DConnection } from "../src/shared/generation-config.js";
 import { TEST_GLB, model3DFixture } from "./model3d-fixture.js";
 
 const directories: string[] = [];
@@ -33,7 +37,8 @@ function meshyService() {
     if (String(url).endsWith("/animations/library")) return Response.json([{ action_id: 0, name: "Idle" }]);
     if (String(url).endsWith("/balance")) return Response.json({ balance: 123 });
     if (init?.method === "POST") return Response.json({ result: `meshy-${++taskNumber}` });
-    return Response.json({ status: "SUCCEEDED", model_urls: { glb: artifact }, result: { animation_glb_url: artifact } });
+    return Response.json({ id: String(url).split("/").at(-1), expires_at: Date.now() + 72 * 60 * 60_000,
+      status: "SUCCEEDED", model_urls: { glb: artifact }, result: { animation_glb_url: artifact } });
   });
 }
 function tripoService(bytes = TEST_GLB, rigType = "biped") {
@@ -129,6 +134,10 @@ describe("3D operation contracts", () => {
     await new TripoProvider(() => "key", tripo, 0).generate({ model: tripoModel, operation: "remesh", source: TEST_GLB, images: [], targetPolycount: 300_000 });
     expect(JSON.parse(String(posts(meshy)[0]![1]!.body))).toMatchObject({ topology: "triangle", target_formats: ["glb"] });
     expect(JSON.parse(String(posts(tripo).at(-1)![1]!.body))).toMatchObject({ model: "v3.0", face_limit: 300_000, quad: false, bake: true });
+    await new MeshyProvider(() => "key", meshy, 0).generate({ model: meshyModel, operation: "remesh", source: TEST_GLB, images: [] });
+    await new TripoProvider(() => "key", tripo, 0).generate({ model: tripoModel, operation: "remesh", source: TEST_GLB, images: [] });
+    expect(JSON.parse(String(posts(meshy).at(-1)![1]!.body))).toMatchObject({ target_polycount: 30_000 });
+    expect(JSON.parse(String(posts(tripo).at(-1)![1]!.body))).toMatchObject({ face_limit: 30_000 });
   });
   it("queries the three own-key balances", async () => {
     expect(await new MeshyProvider(() => "key", meshyService(), 0).accountBalance()).toEqual({ balance: 123 });
@@ -218,21 +227,131 @@ describe("durable 3D tasks and asset preflight", () => {
   });
 });
 
+describe("3D jobs and persistence failures", () => {
+  it("reuses a rig across tool jobs and journals the reused rig for recovery after restart", async () => {
+    const location = await directory(), library = new AssetLibrary(location); await library.load();
+    const source = await library.add("hero.glb", TEST_GLB);
+    const request = meshyService(), service = request.getMockImplementation()!;
+    let failDownload = false;
+    request.mockImplementation(async (url, init) => String(url) === artifact && failDownload
+      ? new Response("offline", { status: 503 }) : service(url, init));
+    const makeRunner = () => new ToolRunner(location, { generate: vi.fn() }, new MeshyProvider(() => "key", request, 0), undefined, library);
+    const runner = makeRunner(); await runner.load();
+    await runner.run("animate-3d", { assetId: source.id, actionIds: [0], heightMeters: 1.6 });
+    failDownload = true;
+    const second = runner.start("animate-3d", { assetId: source.id, actionIds: [30], heightMeters: 1.6 });
+    await vi.waitFor(() => expect(runner.jobs()[0]?.status).toBe("failed")); await runner.close();
+    const restarted = makeRunner(); await restarted.load(); failDownload = false; restarted.retryJob(second.id);
+    await vi.waitFor(() => expect(restarted.jobs()[0]?.status).toBe("succeeded")); await restarted.close();
+    expect(posts(request).filter(([url]) => String(url).endsWith("/rigging"))).toHaveLength(1);
+    const animationBodies = posts(request).filter(([url]) => String(url).endsWith("/animations")).map(([, init]) => JSON.parse(String(init!.body)));
+    expect(animationBodies).toEqual([{ rig_task_id: "meshy-1", action_ids: [0] }, { rig_task_id: "meshy-1", action_ids: [30] }]);
+  });
+  it("reports history write failures without submitting generation and can retry after storage recovers", async () => {
+    const location = await directory(), generate = vi.fn().mockResolvedValue({ bytes: Buffer.from("image"), mediaType: "image/png" });
+    const runner = new ToolRunner(location, { generate }); await runner.load();
+    const file = path.join(location, "tools", "jobs.json"); await mkdir(file);
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const job = runner.start("generate-image", { prompt: "Icon" });
+      await vi.waitFor(() => { expect(runner.jobs()[0]?.status).toBe("failed"); expect(report).toHaveBeenCalled(); });
+      expect(generate).not.toHaveBeenCalled();
+      expect((await readdir(path.dirname(file))).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+      await rm(file, { recursive: true }); runner.retryJob(job.id);
+      await vi.waitFor(() => expect(runner.jobs()[0]?.status).toBe("succeeded"));
+      expect(generate).toHaveBeenCalledTimes(1);
+    } finally { await runner.close(); report.mockRestore(); }
+  });
+  it("handles cancellation and shutdown when generation history becomes unwritable", async () => {
+    const location = await directory();
+    const generate = vi.fn((_input: unknown, signal?: AbortSignal) => new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true })));
+    const runner = new ToolRunner(location, { generate }); await runner.load();
+    const report = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const job = runner.start("generate-image", { prompt: "Icon" });
+      await vi.waitFor(() => expect(generate).toHaveBeenCalled());
+      const file = path.join(location, "tools", "jobs.json"); await rm(file); await mkdir(file);
+      expect(runner.cancelJob(job.id).status).toBe("cancelled");
+      await vi.waitFor(() => expect(report).toHaveBeenCalled());
+      await expect(runner.close()).resolves.toBeUndefined();
+    } finally { await runner.close(); report.mockRestore(); }
+  });
+});
+
 describe("operation capability discovery", () => {
+  it.each(["meshy", "tripo", "hyper3d"] as const)("processes GLBs through the %s connection independently of geometry versions and face counts", async (provider) => {
+    const location = await directory(), library = new AssetLibrary(location); await library.load();
+    const source = await library.add("source.glb", TEST_GLB);
+    const request = provider === "meshy" ? meshyService() : provider === "tripo" ? tripoService() : hyperService();
+    const models = new ProviderModels3D({ runtime: async () => { throw new Error("Native processing needs no custom runtime"); },
+      meshy: { generator: new MeshyProvider(() => "key", request, 0), configured: () => provider === "meshy" },
+      tripo: { generator: new TripoProvider(() => "key", request, 0), configured: () => provider === "tripo" },
+      hyper3d: { generator: new Hyper3DProvider(() => "key", request, 0), configured: () => provider === "hyper3d" },
+      customProviders: async () => [], nativeModels: (id) => [...MODEL_3D_PRESETS[id]],
+      isEnabled: () => true, isVisible: () => false, defaultModel: () => undefined });
+    const runner = new ToolRunner(location, { generate: vi.fn() }, models, undefined, library); await runner.load();
+    for (const id of [MODEL3D_CONNECTION_ID, MODEL_3D_PRESETS[provider].at(-1)!.id]) {
+      const run = await runner.run("image-to-3d", { model: { provider, id }, operation: "retexture", sourceAssetId: source.id,
+        images: provider === "hyper3d" ? [image] : [], ...(provider === "hyper3d" ? {} : { prompt: "Stone" }), targetPolycount: 1_200_000 });
+      expect(library.get(run.files[0]!.assetId!)?.model3d).toMatchObject({ provider, operation: "retexture" });
+    }
+    await runner.close();
+  });
   it("keeps animation available with hidden generation models and requires custom opt-in", async () => {
     const location = await directory(), runtime = await ModelRuntime.create({ authPath: path.join(location, "auth.json"), modelsPath: path.join(location, "models.json"), modelsStorePath: path.join(location, "catalog.json"), allowModelNetwork: false });
     const request = meshyService();
     const providers = new ProviderModels3D({ runtime: async () => runtime,
       meshy: { generator: new MeshyProvider(() => "key", request, 0), configured: () => true },
       tripo: { generator: new TripoProvider(() => "key", tripoService(), 0), configured: () => true },
+      hyper3d: { generator: new Hyper3DProvider(() => "key", hyperService(), 0), configured: () => true },
       customProviders: async () => [], nativeModels: (provider) => [...MODEL_3D_PRESETS[provider]], isEnabled: () => true, isVisible: () => false, defaultModel: () => undefined });
     expect((await providers.catalog()).models).toHaveLength(0);
+    const connections = await providers.operationModels();
+    expect(connections.map(({ provider, id }) => ({ provider, id }))).toEqual([
+      { provider: "meshy", id: MODEL3D_CONNECTION_ID }, { provider: "tripo", id: MODEL3D_CONNECTION_ID }, { provider: "hyper3d", id: MODEL3D_CONNECTION_ID },
+    ]);
+    for (const provider of ["meshy", "tripo", "hyper3d"] as const) {
+      for (const definition of MODEL_3D_PRESETS[provider]) {
+        const ref = { provider, id: definition.id };
+        expect(resolveModel3DConnection(ref, connections)).toMatchObject({ provider, id: MODEL3D_CONNECTION_ID });
+        expect(await providers.resolveOperationModel(ref, "retexture")).toMatchObject({ provider, id: MODEL3D_CONNECTION_ID });
+      }
+    }
+    expect(await providers.resolveOperationModel({ provider: "meshy", id: MODEL3D_CONNECTION_ID }, "image")).toBeUndefined();
     expect(await providers.animations()).toMatchObject([{ id: 0, name: "Idle" }]);
     expect((await providers.animations(undefined, tripoModel))[0]!.id).toMatch(/^preset:biped:/);
     expect(await providers.resolveOperationModel(tripoModel, "animate")).toBeDefined();
+    expect(await providers.resolveOperationModel({ provider: "hyper3d", id: MODEL3D_CONNECTION_ID }, "animate")).toBeUndefined();
+    expect(await providers.balance(meshyModel)).toEqual({ balance: 123 });
     const settings = MODEL_3D_PRESETS.tripo[0]!.settings;
     expect(normalizeModelUsages({ "3d": { ...settings, operations: ["text", "animate", "retexture"] } })?.["3d"]?.operations).toContain("animate");
     expect(() => normalizeModelUsages({ "3d": { ...MODEL_3D_PRESETS.hyper3d[0]!.settings, operations: ["animate"] } })).toThrow();
+  });
+  it("reuses custom Meshy adapters and invalidates rigs when connection auth, headers or endpoints change", async () => {
+    let key = "first-key", header = "first-header";
+    const runtime = { hasConfiguredAuth: () => true, getAuth: async () => ({ auth: { apiKey: key, headers: { "x-studio": header } } }) } as unknown as ModelRuntime;
+    const settings = { ...MODEL_3D_PRESETS.meshy[0]!.settings, operations: ["animate" as const] };
+    const custom: CustomProviderDetails = { id: "studio", name: "Studio", baseUrl: "https://studio.test/v1", authentication: "api_key", api: "openai-completions",
+      hiddenModelIds: ["connection"], models: [normalizeCustomProviderModel({ id: "connection", name: "Geometry", usages: { "3d": settings } }, "openai-completions", "https://studio.test/v1")] };
+    const request = meshyService();
+    const providers = new ProviderModels3D({ runtime: async () => runtime,
+      meshy: { generator: new MeshyProvider(() => "key", request, 0), configured: () => false },
+      customProviders: async () => [custom], nativeModels: (provider) => [...MODEL_3D_PRESETS[provider]],
+      isEnabled: () => true, isVisible: () => false, defaultModel: () => undefined, request });
+    const location = await directory(), providerModel = { provider: custom.id, id: "connection" };
+    const animate = async (id: string) => providers.animate({ model: TEST_GLB, providerModel, actionIds: [0], execution: await model3DJournal(location, id) });
+    await animate("first"); await animate("second");
+    const rigs = () => posts(request).filter(([url]) => String(url).endsWith("/rigging"));
+    expect(rigs()).toHaveLength(1);
+    key = "second-key"; await animate("changed-key");
+    header = "second-header"; await animate("changed-header");
+    custom.baseUrl = "https://other-studio.test/v1"; await animate("changed-endpoint");
+    expect(rigs()).toHaveLength(4);
+    expect(rigs().at(-1)![0]).toBe("https://other-studio.test/v1/rigging");
+    expect(await providers.resolveOperationModel({ provider: custom.id, id: "missing" }, "animate")).toBeUndefined();
+    custom.models[0]!.usages!["3d"]!.operations = [];
+    await expect(animate("disabled-operation")).rejects.toThrow("unavailable");
+    expect(rigs()).toHaveLength(4);
   });
 });
 

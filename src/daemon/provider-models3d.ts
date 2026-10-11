@@ -1,14 +1,18 @@
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import type { CustomProviderDetails, MediaModelCatalog, Model3DDefinition, Model3DModel, Model3DModelRef, Model3DOperation, Model3DOptions } from "../shared/contracts.js";
+import type { CustomModel3DSettings, CustomProviderDetails, MediaModelCatalog, Model3DDefinition, Model3DModel, Model3DModelRef, Model3DOperation, Model3DOptions } from "../shared/contracts.js";
 import { customModel3D, model3DModel } from "../shared/custom-models.js";
-import { resolveModel3D } from "../shared/generation-config.js";
-import { isNative3DProvider, NATIVE_3D_PROVIDER_NAMES, type Native3DProviderId } from "../shared/model3d-presets.js";
+import { resolveModel3D, resolveModel3DConnection } from "../shared/generation-config.js";
+import { isNative3DProvider, MODEL_3D_PRESETS, NATIVE_3D_PROVIDER_NAMES, type Native3DProviderId } from "../shared/model3d-presets.js";
+import { MODEL3D_CONNECTION_ID } from "../shared/model3d-operations.js";
 import { customMediaSource } from "./custom-media-source.js";
 import { TripoProvider } from "./tripo-provider.js";
 import { MeshyProvider } from "./meshy-provider.js";
 import { Hyper3DProvider } from "./hyper3d-provider.js";
 import { Model3DGenerationError, type Model3DGenerator, type Model3DGenerationInput, type Model3DAnimationInput } from "./model3d.js";
 import type { CloudModelsClient } from "./cloud-models.js";
+
+const PROVIDERS = { tripo: TripoProvider, meshy: MeshyProvider, hyper3d: Hyper3DProvider };
+type Connection = MeshyProvider | TripoProvider | Hyper3DProvider;
 
 interface ProviderModels3DOptions {
   runtime: () => Promise<ModelRuntime>;
@@ -25,6 +29,7 @@ interface ProviderModels3DOptions {
 }
 
 export class ProviderModels3D implements Model3DGenerator {
+  readonly #customConnections = new Map<string, { fingerprint: string; generator: Connection }>();
   constructor(private readonly options: ProviderModels3DOptions) {}
 
   async catalog(): Promise<MediaModelCatalog<Model3DModel>> {
@@ -74,23 +79,10 @@ export class ProviderModels3D implements Model3DGenerator {
       if (input.operation && input.operation !== "image") throw new Model3DGenerationError("Cloud currently supports image-to-3D only", 400);
       return this.options.cloud.generate(input, signal);
     }
-    const supported = await this.resolveOperationModel(input.model, input.operation ?? "image");
-    if (!supported) throw new Model3DGenerationError("The selected connection does not support this 3D operation", 400);
-    if (isNative3DProvider(input.model.provider)) {
-      const settings = this.options.nativeModels(input.model.provider).find((model) => model.id === input.model.id)?.settings;
-      if (!settings) throw new Model3DGenerationError("The selected 3D model is unavailable", 503);
-      const connection = this.options[input.model.provider];
-      if (!connection) throw new Model3DGenerationError("The selected 3D provider is unavailable", 503);
-      return connection.generator.generate(input, signal, settings);
-    }
-    const provider = (await this.options.customProviders()).find((provider) => provider.id === input.model.provider);
-    const definition = provider?.models.find((model) => model.id === input.model.id && (input.operation === "retexture" || input.operation === "remesh" || !provider.hiddenModelIds.includes(model.id)));
-    const config = definition?.usages?.["3d"];
-    if (!provider || !config) throw new Model3DGenerationError("The selected 3D model is unavailable", 503);
-    const source = await customMediaSource(await this.options.runtime(), provider, config.baseUrl, signal);
-    const Provider = { tripo: TripoProvider, meshy: MeshyProvider, hyper3d: Hyper3DProvider }[config.protocol];
-    return new Provider(() => source.apiKey, this.options.request ?? fetch, undefined, () => this.options.isEnabled(provider.id),
-      { ...source, settings: config }).generate(input, signal);
+    const selected = await this.resolveOperationModel(input.model, input.operation ?? "image");
+    if (!selected) throw new Model3DGenerationError("The selected connection does not support this 3D operation", 400);
+    const { generator, settings } = await this.connection(selected, signal);
+    return generator.generate(input, signal, settings);
   }
 
   private nativeModels(provider: Native3DProviderId): Model3DModel[] {
@@ -103,7 +95,10 @@ export class ProviderModels3D implements Model3DGenerator {
     const models: Model3DModel[] = [];
     for (const provider of Object.keys(NATIVE_3D_PROVIDER_NAMES) as Native3DProviderId[]) {
       if (!this.options[provider]?.configured() || !this.options.isEnabled(provider)) continue;
-      models.push(...this.options.nativeModels(provider).map((model) => model3DModel(provider, NATIVE_3D_PROVIDER_NAMES[provider], model)));
+      const model = model3DModel(provider, NATIVE_3D_PROVIDER_NAMES[provider], {
+        ...MODEL_3D_PRESETS[provider][0]!, id: MODEL3D_CONNECTION_ID, name: NATIVE_3D_PROVIDER_NAMES[provider],
+      });
+      models.push({ ...model, operations: model.operations!.filter((operation) => operation !== "image" && operation !== "text") });
     }
     for (const provider of await this.options.customProviders()) {
       if (!this.options.isEnabled(provider.id) || !(await this.options.runtime()).hasConfiguredAuth(provider.id)) continue;
@@ -113,19 +108,36 @@ export class ProviderModels3D implements Model3DGenerator {
   }
   async resolveOperationModel(ref: Model3DModelRef | undefined, operation: Model3DOperation): Promise<Model3DModel | undefined> {
     const models = operation === "image" || operation === "text" ? (await this.catalog()).models : await this.operationModels();
-    const model = ref ? resolveModel3D(ref, models)
+    const model = ref ? (operation === "image" || operation === "text" ? resolveModel3D(ref, models) : resolveModel3DConnection(ref, models))
       : operation === "animate" ? models.find((model) => model.provider === "meshy") : models[0];
     return model && (model.operations ?? ["image"]).includes(operation) ? model : undefined;
   }
   private async operationConnection(ref: Model3DModelRef | undefined, operation: Model3DOperation, signal?: AbortSignal) {
-    const selected = operation === "image" && ref ? (await this.operationModels()).find((model) => model.provider === ref.provider && model.id === ref.id) : await this.resolveOperationModel(ref, operation);
+    const selected = await this.resolveOperationModel(ref, operation);
     if (!selected) throw new Model3DGenerationError("The selected 3D operation provider is unavailable", 503);
-    if (isNative3DProvider(selected.provider)) return this.options[selected.provider]!.generator;
-    const provider = (await this.options.customProviders()).find((provider) => provider.id === selected.provider)!;
-    const config = provider.models.find((model) => model.id === selected.id)!.usages!["3d"]!;
-    const source = await customMediaSource(await this.options.runtime(), provider, config.baseUrl, signal);
-    const Provider = { tripo: TripoProvider, meshy: MeshyProvider, hyper3d: Hyper3DProvider }[config.protocol];
-    return new Provider(() => source.apiKey, this.options.request ?? fetch, undefined, () => this.options.isEnabled(provider.id), { ...source, settings: config });
+    return (await this.connection(selected, signal)).generator;
+  }
+  private async connection(model: Model3DModel, signal?: AbortSignal): Promise<{ generator: Connection; settings: CustomModel3DSettings }> {
+    if (isNative3DProvider(model.provider)) {
+      const connection = this.options[model.provider];
+      const settings = model.id === MODEL3D_CONNECTION_ID ? MODEL_3D_PRESETS[model.provider][0]!.settings
+        : this.options.nativeModels(model.provider).find((definition) => definition.id === model.id)?.settings;
+      if (!connection?.configured() || !settings) throw new Model3DGenerationError("The selected 3D connection is unavailable", 503);
+      return { generator: connection.generator, settings };
+    }
+    const provider = (await this.options.customProviders()).find((provider) => provider.id === model.provider);
+    const settings = provider?.models.find((definition) => definition.id === model.id)?.usages?.["3d"];
+    if (!provider || !settings) throw new Model3DGenerationError("The selected 3D connection is unavailable", 503);
+    const source = await customMediaSource(await this.options.runtime(), provider, settings.baseUrl, signal);
+    const key = JSON.stringify([provider.id, model.id]), fingerprint = JSON.stringify([source, settings]);
+    let cached = this.#customConnections.get(key);
+    if (!cached || cached.fingerprint !== fingerprint) {
+      const Provider = PROVIDERS[settings.protocol];
+      cached = { fingerprint, generator: new Provider(() => source.apiKey, this.options.request ?? fetch, undefined,
+        () => this.options.isEnabled(provider.id), { ...source, settings }) };
+      this.#customConnections.set(key, cached);
+    }
+    return { generator: cached.generator, settings };
   }
   async animate(input: Model3DAnimationInput, signal?: AbortSignal) {
     const connection = await this.operationConnection(input.providerModel, "animate", signal);
@@ -135,10 +147,11 @@ export class ProviderModels3D implements Model3DGenerator {
   async animations(signal?: AbortSignal, model?: Model3DModelRef, options?: Model3DOptions) {
     const connection = await this.operationConnection(model, "animate", signal);
     if (!("animations" in connection)) throw new Model3DGenerationError("This provider has no animation library", 400);
-    return connection instanceof TripoProvider ? connection.animations(signal, model, options) : connection.animations(signal);
+    return connection.animations(signal, model, options);
   }
   async balance(model: Model3DModelRef, signal?: AbortSignal) {
-    const connection = await this.operationConnection(model, "image", signal);
-    return connection.accountBalance(signal);
+    const selected = resolveModel3DConnection(model, await this.operationModels());
+    if (!selected) throw new Model3DGenerationError("The selected 3D connection is unavailable", 503);
+    return (await this.connection(selected, signal)).generator.accountBalance(signal);
   }
 }

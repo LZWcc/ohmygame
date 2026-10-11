@@ -40,7 +40,10 @@ for existing tool permissions. The `animate-3d` agent tool accepts the connectio
 Tripo rig settings and resolves action names through that connection's library.
 
 Native processing and animation connections remain available when generation models
-are hidden. A custom 3D model stays generation-only until **Compatible 3D operations**
+are hidden. Each native provider appears once in these selectors, using the stable
+`connection` ID; older geometry-version references still resolve to that connection.
+Generation selectors keep their geometry versions. Moves load when the picker opens.
+A custom 3D model stays generation-only until **Compatible 3D operations**
 explicitly enables additional endpoints. Compatible calls honor the model's base
 URL override, auth mode and runtime headers. A custom Meshy URL ending in `/v1`
 uses the documented sibling `/v2` for text tasks; a relay with a different layout
@@ -57,6 +60,11 @@ API keys are hashed into fingerprints and never saved in the journal. Hyper3D's
 subscription credential stays in the private journal; it is not included in public
 jobs or assets. Journal and standalone history files use owner-only permissions.
 Canvas history stays in the project's existing `canvas/jobs.json`.
+
+Meshy reuses an available rig for the same source, height and orientation across jobs
+in the running daemon. The reused rig is also recorded in the new job's journal, so
+its retry can recover after restart. Custom connections reuse their adapter while
+the endpoint, settings, authentication and headers remain unchanged.
 
 **Retry** resumes known upload, generation, refine, rig-check, rig and animation
 tasks, including a failed artifact download. It does not resubmit a known failed

@@ -4,9 +4,7 @@ export const MODEL3D_OPERATIONS: readonly Model3DOperation[] = ["image", "text",
 export function protocolOperations(protocol: CustomModel3DSettings["protocol"]): Model3DOperation[] {
   return protocol === "hyper3d" ? ["image", "text", "retexture"] : [...MODEL3D_OPERATIONS];
 }
-export function nativeOperations(settings: CustomModel3DSettings): Model3DOperation[] {
-  return protocolOperations(settings.protocol);
-}
+export const MODEL3D_CONNECTION_ID = "connection";
 /** Processing uses its own API limits, independently of the selected geometry version. */
 export function remeshPolycount(protocol?: CustomModel3DSettings["protocol"]): CustomModel3DSettings["polycount"] {
   return { min: 100, max: protocol === "meshy" ? 300_000 : 1_500_000, default: 30_000, presets: [1_000, 4_000, 10_000, 30_000, 100_000, 300_000] };

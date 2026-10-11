@@ -35,6 +35,7 @@ import { model3DJournal } from "./model3d-journal.js";
 import { inspectModel3D } from "./model3d-inspect.js";
 import type { Model3DExecution } from "./model3d.js";
 import { MAX_ANIMATION_ACTIONS, resolveModel3D } from "../shared/generation-config.js";
+import { remeshPolycount } from "../shared/model3d-operations.js";
 import { VideoGenerationError, type VideoGenerator, type VideoReferenceAsset } from "./video-generation.js";
 import type { AssetLibrary } from "./asset-library.js";
 
@@ -94,10 +95,15 @@ export class ToolRunner {
     this.#jobWrites = this.#jobWrites.catch(() => {}).then(async () => {
       const file = path.join(this.#runsDirectory, "../jobs.json");
       const temporary = `${file}.${randomUUID()}.tmp`;
-      await writeFile(temporary, JSON.stringify([...this.#jobs.values()].map(({ controller: _, ...job }) => job)), { mode: 0o600 });
-      await rename(temporary, file);
+      try {
+        await writeFile(temporary, JSON.stringify([...this.#jobs.values()].map(({ controller: _, ...job }) => job)), { mode: 0o600 });
+        await rename(temporary, file);
+      } finally { await rm(temporary, { force: true }).catch(() => {}); }
     });
     return this.#jobWrites;
+  }
+  async #saveJobsSafely(): Promise<void> {
+    await this.#saveJobs().catch((cause) => console.error("Could not save generation history", cause));
   }
 
   start(toolId: string, input: RunToolRequest, metadata: ToolJobMetadata = {}, prepared = false, recoveryId: string = randomUUID()): ToolJob {
@@ -136,7 +142,7 @@ export class ToolRunner {
       job.status = "cancelled";
       job.error = "Generation cancelled";
       job.controller.abort();
-      void this.#saveJobs();
+      void this.#saveJobsSafely();
     }
     return publicJob(job);
   }
@@ -156,8 +162,8 @@ export class ToolRunner {
     for (const job of this.#jobs.values()) {
       if (job.status === "running") { changed = true; job.status = "cancelled"; job.error = "Generation interrupted. Retry to resume the submitted 3D task."; job.controller.abort(); }
     }
-    if (changed) await this.#saveJobs();
-    else await this.#jobWrites;
+    if (changed) await this.#saveJobsSafely();
+    else await this.#jobWrites.catch((cause) => console.error("Could not save generation history", cause));
   }
 
   async #execute(job: ToolJobRecord): Promise<void> {
@@ -185,7 +191,7 @@ export class ToolRunner {
       }
     } finally {
       this.#pruneJobs();
-      if (!this.#closed) await this.#saveJobs();
+      if (!this.#closed) await this.#saveJobsSafely();
     }
   }
 
@@ -313,8 +319,8 @@ export class ToolRunner {
     if (operation === "text" && (!input.prompt?.trim() || images.length)) throw new ToolRunError("Text-to-3D needs a prompt without images", 400);
     if (operation === "retexture" && !input.prompt?.trim() && !images.length) throw new ToolRunError("Add a texture prompt or reference image", 400);
     if (operation === "remesh" && (images.length || input.prompt?.trim())) throw new ToolRunError("Remesh takes a model and face count only", 400);
-    const range = operation === "remesh" ? { min: 100, max: model.protocol === "meshy" ? 300_000 : 1_500_000 } : model.polycount;
-    if (input.targetPolycount !== undefined && (!Number.isInteger(input.targetPolycount) || input.targetPolycount < range.min || input.targetPolycount > range.max)) throw new ToolRunError(`3D poly count must be between ${range.min} and ${range.max}`, 400);
+    const range = operation === "remesh" ? remeshPolycount(model.protocol) : model.polycount;
+    if (operation !== "retexture" && input.targetPolycount !== undefined && (!Number.isInteger(input.targetPolycount) || input.targetPolycount < range.min || input.targetPolycount > range.max)) throw new ToolRunError(`3D poly count must be between ${range.min} and ${range.max}`, 400);
     if (input.texture !== undefined && typeof input.texture !== "boolean" || input.pbr !== undefined && typeof input.pbr !== "boolean") throw new ToolRunError("Texture and PBR must be booleans", 400);
     if (!generator) throw new ToolRunError("3D generation is not configured", 503);
     validateOperationOptions(input.options, operation, model.protocol);

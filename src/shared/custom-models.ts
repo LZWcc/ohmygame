@@ -1,4 +1,4 @@
-import { nativeOperations, protocolOperations } from "./model3d-operations.js";
+import { protocolOperations } from "./model3d-operations.js";
 import {
   IMAGE_ASPECT_RATIOS, IMAGE_OUTPUT_COUNTS, IMAGE_RESOLUTIONS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS,
   type CustomImageModelSettings, type CustomModel3DSettings, type CustomModelUsages, type CustomProviderModel,
@@ -57,7 +57,7 @@ export function customModel3D(provider: CustomProviderSettings, model: CustomPro
 }
 export function model3DModel(provider: string, providerName: string, model: Model3DDefinition): Model3DModel {
   const config = model.settings;
-  return { provider, providerName, id: model.id, name: model.name, protocol: config.protocol, operations: nativeOperations(config),
+  return { provider, providerName, id: model.id, name: model.name, protocol: config.protocol, operations: protocolOperations(config.protocol),
     ...(config.protocol === "tripo" ? { referenceImageLabels: ["Front", "Left", "Back", "Right"] } : {}),
     ...(config.protocol === "hyper3d" ? { estimatedCredits: hyper3DCredits(model.id) } : {}),
     maxReferenceImages: config.maxReferenceImages, polycount: config.polycount, supportsTexture: config.supportsTexture,
