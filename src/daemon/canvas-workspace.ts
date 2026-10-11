@@ -269,7 +269,7 @@ export async function removeCanvasAssetReferences(workspace: string, assetIds: s
     }
   });
 }
-type StoredJob = ToolJob & { input?: RunToolRequest };
+type StoredJob = ToolJob & { input?: RunToolRequest; recoveryId?: string };
 export class CanvasStore {
   readonly #jobs = new Map<string, StoredJob[]>();
   readonly #controllers = new Map<string, AbortController>();
@@ -416,13 +416,13 @@ export class CanvasStore {
     try {
       const value: unknown = JSON.parse(await readFile(await canvasPath(this.#project(id).workspacePath, "jobs.json"), "utf8"));
       if (!Array.isArray(value) || value.length > 1000 || value.some((job) => !job || typeof job.id !== "string" || job.context?.projectId !== id || typeof job.context?.boardId !== "string" || typeof job.context?.nodeId !== "string" || !["running", "succeeded", "failed", "cancelled"].includes(job.status))) throw new CanvasError("Invalid generation history");
-      jobs = value.map((job) => job.status === "running" ? { ...job, status: "cancelled", error: "Generation was interrupted. Retry to generate again." } : job);
+      jobs = value.map((job) => job.status === "running" ? { ...job, status: "cancelled", error: "Generation was interrupted. Retry to resume a submitted 3D task." } : job);
     } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause; }
     this.#jobs.set(id, jobs); await this.#saveJobs(id); return jobs;
   }
   #saveJobs(id: string) { return writeJson(this.#project(id).workspacePath, "jobs.json", this.#jobs.get(id) ?? []); }
-  async jobs(id: string): Promise<ToolJob[]> { return withCanvasLock(this.#project(id).workspacePath, async () => (await this.#loadJobs(id)).map(({ input: _input, ...job }) => structuredClone(job))); }
-  async start(id: string, boardId: string, nodeId: string, toolId: ToolId, input: RunToolRequest, expectedRevision?: string): Promise<ToolJob> {
+  async jobs(id: string): Promise<ToolJob[]> { return withCanvasLock(this.#project(id).workspacePath, async () => (await this.#loadJobs(id)).map(({ input: _input, recoveryId: _recoveryId, ...job }) => structuredClone(job))); }
+  async start(id: string, boardId: string, nodeId: string, toolId: ToolId, input: RunToolRequest, expectedRevision?: string, recoveryId?: string): Promise<ToolJob> {
     const workspace = this.#project(id).workspacePath;
     const { job, prepared } = await withCanvasLock(workspace, async () => {
       if (this.#closed) throw new CanvasError("Generation is shutting down", 503);
@@ -437,14 +437,15 @@ export class CanvasStore {
       const model = "imageModel" in resolved ? resolved.imageModel : "model" in resolved ? resolved.model : undefined;
       if (toolId === "generate-video" && "references" in prepared) for (const reference of prepared.references ?? []) reference.assetId = await canvasLibraryAsset(this.#project(id), this.library, reference.assetId);
       if (toolId === "animate-3d" && "assetId" in prepared) prepared.assetId = await canvasLibraryAsset(this.#project(id), this.library, prepared.assetId);
-      const job: StoredJob = { id: randomUUID(), toolId, createdAt: new Date().toISOString(), status: "running", title: "prompt" in input ? input.prompt.slice(0, 200) : "Model 3D", context: { projectId: id, boardId, nodeId }, ...(model ? { model } : {}), input: structuredClone(resolved) };
+      if (toolId === "image-to-3d" && "sourceAssetId" in prepared && prepared.sourceAssetId) prepared.sourceAssetId = await canvasLibraryAsset(this.#project(id), this.library, prepared.sourceAssetId);
+      const job: StoredJob = { recoveryId: recoveryId ?? randomUUID(), id: randomUUID(), toolId, createdAt: new Date().toISOString(), status: "running", title: "prompt" in input ? (input.prompt ?? "Model 3D").slice(0, 200) : "Model 3D", context: { projectId: id, boardId, nodeId }, ...(model ? { model } : {}), input: structuredClone(resolved) };
       if (jobs.filter((job) => job.status === "running").length >= 20) throw new CanvasError("Too many active generation jobs", 409);
       this.#jobs.set(id, [job, ...jobs.filter((job) => job.status === "running"), ...jobs.filter((job) => job.status !== "running").slice(0, 80)]); await this.#saveJobs(id); return { job, prepared };
     });
     const controller = new AbortController(); this.#controllers.set(job.id, controller);
     const execution = this.#execute(id, job, prepared, controller); this.#executions.add(execution);
     void execution.finally(() => this.#executions.delete(execution));
-    const { input: _input, ...publicJob } = job; return structuredClone(publicJob);
+    const { input: _input, recoveryId: _recoveryId, ...publicJob } = job; return structuredClone(publicJob);
   }
   async generateNode(id: string, boardId: string, nodeId: string): Promise<ToolJob> {
     const project = this.#project(id), { board, revision } = await this.board(id, boardId);
@@ -463,10 +464,14 @@ export class CanvasStore {
     };
     if (node.type === "animate-3d") {
       if (!node.data.source || !node.data.actionIds.length) throw new CanvasError("Choose a source model and animation actions first");
-      return this.start(id, boardId, nodeId, "animate-3d", { assetId: assetId(node.data.source), actionIds: node.data.actionIds, heightMeters: node.data.heightMeters }, revision);
+      return this.start(id, boardId, nodeId, "animate-3d", { model: node.data.model, options: node.data.options, assetId: assetId(node.data.source), actionIds: node.data.actionIds, heightMeters: node.data.heightMeters }, revision);
     }
     if (node.type === "model-3d") {
-      if (!node.data.images.length) throw new CanvasError("Add a reference image before generating");
+      const operation = node.data.operation ?? "image";
+      if (operation === "image" && !node.data.images.length) throw new CanvasError("Add a reference image before generating");
+      const linked = board.nodes.find((candidate) => candidate.id === node.data.promptSource?.nodeId);
+      const text = linked?.type === "text" ? linked.data.text : linked?.type === "document" ? (await this.read(id, linked.data.documentId))?.document.markdown : undefined;
+      const prompt = combineAssetCanvasPrompt(text, node.data.prompt ?? "");
       const images = await Promise.all(node.data.images.map(async (reference) => {
         const source = await image(reference);
         if (source.mediaType === "image/webp") {
@@ -477,7 +482,7 @@ export class CanvasStore {
         if (source.mediaType !== "image/png" && source.mediaType !== "image/jpeg") throw new CanvasError("3D generation requires PNG, JPEG or WebP reference images");
         return source;
       }));
-      return this.start(id, boardId, nodeId, "image-to-3d", buildModel3DToolRequest(node.data, images), revision);
+      return this.start(id, boardId, nodeId, "image-to-3d", { ...buildModel3DToolRequest(node.data, images, operation), operation, ...(prompt ? { prompt } : {}), ...(node.data.source ? { sourceAssetId: assetId(node.data.source) } : {}), ...(node.data.options ? { options: node.data.options } : {}) }, revision);
     }
     if (node.type !== "image" && node.type !== "video") throw new CanvasError("Unsupported generation node");
     const linked = board.nodes.find((candidate) => candidate.id === node.data.promptSource?.nodeId);
@@ -499,7 +504,7 @@ export class CanvasStore {
   }
   async #execute(id: string, job: StoredJob, prepared: RunToolRequest, controller: AbortController) {
     try {
-      const run = await this.tools.runPrepared(job.toolId, prepared, controller.signal); controller.signal.throwIfAborted();
+      const run = await this.tools.runPrepared(job.toolId, prepared, controller.signal, job.recoveryId ?? job.id); controller.signal.throwIfAborted();
       const output = run.files[0];
       if (!output?.assetId) throw new CanvasError("Generation returned no Library asset", 502);
       await withCanvasLock(this.#project(id).workspacePath, async () => {
@@ -523,14 +528,14 @@ export class CanvasStore {
     return withCanvasLock(this.#project(id).workspacePath, async () => {
       const job = (await this.#loadJobs(id)).find((job) => job.id === jobId);
       if (!job) throw new CanvasError("Generation job not found", 404);
-      if (job.status === "running") { job.status = "cancelled"; job.error = "Generation cancelled"; this.#controllers.get(job.id)?.abort(); await this.#saveJobs(id); }
-      const { input: _input, ...result } = job; return structuredClone(result);
+      if (job.status === "running") { job.status = "cancelled"; job.error = job.toolId === "image-to-3d" || job.toolId === "animate-3d" ? "Stopped waiting locally. Retry to resume; the provider task may still be running." : "Generation cancelled"; this.#controllers.get(job.id)?.abort(); await this.#saveJobs(id); }
+      const { input: _input, recoveryId: _recoveryId, ...result } = job; return structuredClone(result);
     });
   }
   async retry(id: string, jobId: string): Promise<ToolJob> {
     const job = await withCanvasLock(this.#project(id).workspacePath, async () => (await this.#loadJobs(id)).find((job) => job.id === jobId));
     if (!job || !job.input || !["failed", "cancelled"].includes(job.status)) throw new CanvasError("This job cannot be retried", 409);
-    return this.start(id, job.context!.boardId!, job.context!.nodeId, job.toolId, job.input);
+    return this.start(id, job.context!.boardId!, job.context!.nodeId, job.toolId, job.input, undefined, job.recoveryId ?? job.id);
   }
   async cancelProject(id: string) { for (const job of this.#jobs.get(id) ?? []) if (job.status === "running") await this.cancel(id, job.id); this.#jobs.delete(id); }
   async close() { this.#closed = true; for (const controller of this.#controllers.values()) controller.abort(); await Promise.allSettled(this.#executions); }

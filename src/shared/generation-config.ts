@@ -1,4 +1,5 @@
-import { type Model3DGenerationConfig, type Model3DModel, type PromptImage, type Run3DToolRequest } from "./contracts.js";
+import { type Model3DGenerationConfig, type Model3DModel, type Model3DOperation, type PromptImage, type Run3DToolRequest } from "./contracts.js";
+import { remeshPolycount } from "./model3d-operations.js";
 import { BUILTIN_CLOUD_CATALOG, cloudModelId } from "./cloud-models.js";
 import { model3DModel } from "./custom-models.js";
 import { MODEL_3D_PRESETS, NATIVE_3D_PROVIDER_NAMES, type Native3DProviderId } from "./model3d-presets.js";
@@ -41,9 +42,9 @@ export const DEFAULT_MODEL_3D_CONFIG: Model3DGenerationConfig = {
   pbr: false,
 };
 
-export function normalizeModel3DConfig(value: Partial<Model3DGenerationConfig> | undefined, model?: Model3DModel): Model3DGenerationConfig {
+export function normalizeModel3DConfig(value: Partial<Model3DGenerationConfig> | undefined, model?: Model3DModel, operation: Model3DOperation = "image"): Model3DGenerationConfig {
   const texture = model?.supportsTexture === false ? false : value?.texture ?? model?.defaults?.texture ?? DEFAULT_MODEL_3D_CONFIG.texture;
-  const polycount = model?.polycount ?? resolveModel3D(value?.model)?.polycount ?? (value?.model
+  const polycount = operation === "remesh" ? remeshPolycount((model ?? resolveModel3D(value?.model))?.protocol) : model?.polycount ?? resolveModel3D(value?.model)?.polycount ?? (value?.model
     ? { min: 100, max: MODEL_3D_MAX_POLYCOUNT, default: DEFAULT_MODEL_3D.polycount.default } : DEFAULT_MODEL_3D.polycount);
   const targetPolycount = value?.targetPolycount;
   return {
@@ -54,8 +55,8 @@ export function normalizeModel3DConfig(value: Partial<Model3DGenerationConfig> |
   };
 }
 
-export function buildModel3DToolRequest(configValue: Partial<Model3DGenerationConfig>, images: PromptImage[]): Run3DToolRequest {
-  const config = normalizeModel3DConfig(configValue);
+export function buildModel3DToolRequest(configValue: Partial<Model3DGenerationConfig>, images: PromptImage[], operation: Model3DOperation = "image"): Run3DToolRequest {
+  const config = normalizeModel3DConfig(configValue, undefined, operation);
   return {
     images,
     ...(config.model ? { model: config.model } : {}),

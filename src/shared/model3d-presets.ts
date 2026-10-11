@@ -27,7 +27,7 @@ export const MODEL_3D_PRESETS: Record<Native3DProviderId, readonly Model3DDefini
     { id: "v3.1-20260211", name: "Tripo V3.1", settings: { ...defaultModel3DSettings("standard", "tripo"),
       polycount: { min: 100, max: 1_500_000, default: 30_000, presets: [10_000, 30_000, 100_000, 300_000] } } },
     { id: "P2-20260801", name: "Tripo P2 (preview)", settings: { ...defaultModel3DSettings("standard", "tripo"),
-      polycount: { min: 100, max: 50_000, default: 4_000, presets: [1_000, 4_000, 10_000, 20_000, 50_000] } } },
+      polycount: { min: 48, max: 50_000, default: 4_000, presets: [1_000, 4_000, 10_000, 20_000, 50_000] } } },
     ...[{ id: "v3.0-20250812", name: "Tripo V3.0", max: 1_000_000 }, { id: "v2.5-20250123", name: "Tripo V2.5", max: 500_000 }].map(({ id, name, max }) => ({ id, name,
       settings: { ...defaultModel3DSettings("standard", "tripo"), polycount: { min: 100, max, default: 30_000, presets: [10_000, 30_000, 100_000, 300_000] } } })),
   ],

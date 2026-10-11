@@ -372,8 +372,14 @@ export async function listModel3DCatalog(): Promise<MediaModelCatalog<Model3DMod
 }
 
 /** Preset moves for rigged humanoids; empty until a 3D provider is set up. */
-export async function listModel3DAnimations(): Promise<Model3DAnimationAction[]> {
-  return request("/model3d-animations");
+export async function listModel3DAnimations(model?: AgentModelRef, options?: import("../shared/contracts.js").Model3DOptions): Promise<Model3DAnimationAction[]> {
+  const query = new URLSearchParams({ ...(model ? { provider: model.provider, id: model.id } : {}),
+    ...(options?.rigModel ? { rigModel: options.rigModel } : {}), ...(options?.rigType ? { rigType: options.rigType } : {}) });
+  return request(`/model3d-animations?${query}`);
+}
+export async function listModel3DOperations(): Promise<Model3DModel[]> { return request("/model3d-operations"); }
+export async function model3DBalance(model: AgentModelRef): Promise<import("../shared/contracts.js").Model3DBalance> {
+  return request(`/model3d-balance?${new URLSearchParams({ provider: model.provider, id: model.id })}`);
 }
 
 export async function getWebSearchSettings(): Promise<WebSearchSettings> {

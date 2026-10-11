@@ -55,6 +55,7 @@ vi.doMock(path.resolve("src/renderer/api.ts"), async (original) => ({
   listImageModelCatalog: async () => ({ models: [], providers: [] }),
   listVideoModelCatalog: async () => ({ models: [], providers: [] }),
   listModel3DCatalog: async () => ({ models: [], providers: [] }),
+  listModel3DOperations: async () => [],
   listPlayablePresets: async () => ({ presets: [] }),
   listPlayableThumbnails: async () => ({}),
   getPlayableValidation: async () => ({ issues: [] }),
