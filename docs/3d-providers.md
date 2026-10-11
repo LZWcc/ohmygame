@@ -53,8 +53,12 @@ that a relay actually implements an endpoint.
 ## Recovering paid tasks
 
 Canvas history and standalone tool history save resolved inputs. Each logical 3D
-job also has a private task journal under `tools/model3d-tasks/`. Before submission,
-it records a stage fingerprint; after the response, it records task credentials.
+job also has a private task journal under `tools/model3d-tasks/`. Jobs sharing a
+recovery ID reuse confirmed stages, including when a duplicated project retries
+while the original is running. The daemon serializes submissions to each journal
+and reads its latest saved stages; polling and downloads can run independently.
+Before submission, it records a stage fingerprint; after the response, it records
+task credentials.
 Fingerprints cover the endpoint, authentication/headers and effective request body.
 API keys are hashed into fingerprints and never saved in the journal. Hyper3D's
 subscription credential stays in the private journal; it is not included in public
