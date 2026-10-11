@@ -5793,6 +5793,8 @@ button.home-nav-item-active:hover {
   height: 52px;
   place-items: center;
   border-radius: 9px;
+  background: var(--surface-hover);
+  color: var(--text-secondary);
 }
 
 .plugin-row-copy {
@@ -6061,11 +6063,6 @@ button.home-nav-item-active:hover {
   .plugins-installed-grid {
     grid-template-columns: 1fr;
   }
-}
-
-.plugin-row-icon-media {
-  background: #1c302b;
-  color: var(--accent);
 }
 
 .plugin-row-icon-godot {
@@ -14278,10 +14275,6 @@ button {
 
 :root[data-appearance="light"] .plugin-switch[aria-checked="true"] {
   border-color: var(--settings-switch-accent);
-}
-
-:root[data-appearance="light"] .plugin-row-icon-media {
-  background: #ececec;
 }
 
 :root[data-appearance="light"] .plugin-row-icon-godot {
