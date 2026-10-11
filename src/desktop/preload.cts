@@ -40,8 +40,10 @@ if (process.isMainFrame) {
     }),
     capturePage: (bounds: { x: number; y: number; width: number; height: number }) =>
       ipcRenderer.invoke("ohmygame:capture-page", bounds) as Promise<Uint8Array>,
-    captureNodeThumbnail: (projectId: string, nodeId: string, viewport: { width: number; height: number }) =>
-      ipcRenderer.invoke("ohmygame:capture-node-thumbnail", projectId, nodeId, viewport) as Promise<boolean>,
+    captureNodeThumbnail: (projectId: string, nodeId: string, viewport: { width: number; height: number }, batchId: string) =>
+      ipcRenderer.invoke("ohmygame:capture-node-thumbnail", projectId, nodeId, viewport, batchId) as Promise<boolean>,
+    cancelNodeThumbnails: (batchId: string) =>
+      ipcRenderer.invoke("ohmygame:cancel-node-thumbnails", batchId) as Promise<void>,
     finishNodeThumbnail: (captured: boolean) => ipcRenderer.invoke("ohmygame:finish-node-thumbnail", captured) as Promise<void>,
     openPlaytest: (projectId: string, viewport: { width: number; height: number }) =>
       ipcRenderer.invoke("ohmygame:open-playtest", projectId, viewport) as Promise<void>,

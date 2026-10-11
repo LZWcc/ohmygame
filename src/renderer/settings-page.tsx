@@ -259,9 +259,15 @@ function AboutSettings() {
               <div className="settings-about-actions">
                 {status?.type === "available" ? <button className="settings-primary-button" type="button" onClick={() => void updates.download()}>Download update</button> : null}
                 {status?.type === "ready" ? <button className="settings-primary-button" type="button" onClick={() => void updates.install()}>Restart to update</button> : null}
-                <button className="settings-secondary-button" type="button" disabled={busy} onClick={() => void updates.check()}>
-                  {status?.type === "error" ? "Check again" : "Check for updates"}
-                </button>
+                {status?.type === "error" && status.restartRequired ? (
+                  <button className="settings-secondary-button" type="button" onClick={() => void window.ohMyGameDesktop?.restartApp?.()}>
+                    Restart app to retry
+                  </button>
+                ) : (
+                  <button className="settings-secondary-button" type="button" disabled={busy} onClick={() => void updates.check()}>
+                    {status?.type === "error" ? "Check again" : "Check for updates"}
+                  </button>
+                )}
               </div>
             ) : null}
           </div>

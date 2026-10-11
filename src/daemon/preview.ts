@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import type { ProjectState } from "../shared/contracts.js";
 import type { RuntimeEventBus } from "../shared/events.js";
+import { exitsWithin } from "../shared/process-exit.js";
 import { supportsWebPreview } from "../shared/project-runtime.js";
 import { packageManagerCommand, packageManagerRunArguments, resolvePackageManager } from "./package-manager.js";
 import { ensureProjectDependencies } from "./project-dependencies.js";
@@ -189,7 +190,14 @@ async function availablePort(): Promise<number> {
 async function waitUntilReady(url: string, child: ChildProcess, timeoutMs: number, stderr: () => string): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(withOutput(`Preview exited before ready (${child.exitCode})`, stderr()));
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        withOutput(
+          `Preview exited before ready (${child.signalCode ?? child.exitCode})`,
+          stderr(),
+        ),
+      );
+    }
     try {
       if ((await fetch(url, { signal: AbortSignal.timeout(1_000) })).ok) return;
     } catch {}
@@ -221,14 +229,20 @@ async function waitForCommand(child: ChildProcess, command: string): Promise<voi
 }
 
 async function terminate(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null) return;
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) =>
+    child.once("exit", () => resolve()),
+  );
   await signalProcessTree(child, false);
-  const timedOut = await Promise.race([
-    exited.then(() => false),
-    new Promise<true>((resolve) => setTimeout(() => resolve(true), 3_000)),
-  ]);
-  if (timedOut && child.exitCode === null) await signalProcessTree(child, true);
+  if (
+    !(await exitsWithin(exited, 3_000)) &&
+    child.exitCode === null &&
+    child.signalCode === null
+  ) {
+    await signalProcessTree(child, true);
+    if (!(await exitsWithin(exited, 3_000)))
+      throw new Error(`Preview process ${child.pid ?? "unknown"} did not exit`);
+  }
 }
 
 async function signalProcessTree(child: ChildProcess, force: boolean): Promise<void> {

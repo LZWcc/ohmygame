@@ -19,6 +19,7 @@ try {
     piAgentDirectory: path.join(directory, "pi-agent"),
     token: "node-runtime-check",
     allowedOrigins: [],
+    resolveSystemProxy: async () => "DIRECT",
   });
   const unauthorized = await fetch(`${daemon.runtime.url}/projects`);
   assert.equal(unauthorized.status, 401);
@@ -49,10 +50,10 @@ try {
   const result = await tested.json();
   assert.equal(result.status, "connected", JSON.stringify(result));
   assert.equal(result.toolCount, 1);
-  console.log(
-    `Node.js ${process.versions.node}: daemon startup, authenticated API and native MCP runtime passed`,
-  );
 } finally {
   await daemon?.stop();
   await rm(directory, { recursive: true, force: true });
 }
+console.log(
+  `Node.js ${process.versions.node}: daemon startup, authenticated API, native MCP runtime and graceful shutdown passed`,
+);

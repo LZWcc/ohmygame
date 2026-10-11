@@ -1,9 +1,16 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:net";
 import path from "node:path";
-import type { PlaytestIpcMessage, PlaytestRequest, PlaytestResult } from "../shared/playtest.js";
+import type {
+  PlaytestIpcMessage,
+  PlaytestRequest,
+  PlaytestResult,
+} from "../shared/playtest.js";
+import { exitsWithin } from "../shared/process-exit.js";
 
 const MAX_STARTUP_OUTPUT_CHARS = 8_000;
+const GRACEFUL_SHUTDOWN_TIMEOUT_MS = 20_000;
+const FORCE_SHUTDOWN_TIMEOUT_MS = 5_000;
 
 export interface DaemonRuntime {
   url: string;
@@ -99,14 +106,14 @@ export async function startDaemon(options: StartDaemonOptions): Promise<ManagedD
     throw error;
   }
 
-  let stopped = false;
+  let stopping: Promise<void> | undefined;
   return {
     runtime,
-    async stop() {
-      if (stopped) return;
-      stopped = true;
-      playtestRequests?.close();
-      await stopChild(child);
+    stop() {
+      return (stopping ??= (async () => {
+        playtestRequests?.close();
+        await stopChild(child);
+      })());
     },
   };
 }
@@ -199,13 +206,41 @@ function startupError(message: string, output: string): Error {
 
 async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
-  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  child.kill("SIGTERM");
-  const forced = await Promise.race([exited.then(() => false), delay(5_000).then(() => true)]);
-  if (forced && child.exitCode === null && child.signalCode === null) {
-    child.kill("SIGKILL");
-    await exited;
+  const exited = new Promise<void>((resolve) =>
+    child.once("exit", () => resolve()),
+  );
+  if (child.connected) {
+    try {
+      child.send({ channel: "ohmygame:shutdown" }, () => {});
+      if (await exitsWithin(exited, GRACEFUL_SHUTDOWN_TIMEOUT_MS)) {
+        if (child.exitCode === 0) return;
+        throw new Error(
+          `Daemon could not shut down cleanly (${child.exitCode ?? child.signalCode})`,
+        );
+      }
+    } catch (error) {
+      if (child.exitCode !== null || child.signalCode !== null) throw error;
+      console.warn("Could not request graceful daemon shutdown", error);
+    }
   }
+  if (process.platform === "win32") {
+    if (!child.pid)
+      throw new Error("Cannot stop the daemon process tree without a PID");
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      killer.once("error", reject);
+      killer.once("exit", () => resolve());
+    });
+  } else {
+    child.kill("SIGTERM");
+    if (await exitsWithin(exited, FORCE_SHUTDOWN_TIMEOUT_MS)) return;
+    child.kill("SIGKILL");
+  }
+  if (!(await exitsWithin(exited, FORCE_SHUTDOWN_TIMEOUT_MS)))
+    throw new Error("Daemon did not exit after forced shutdown");
 }
 
 function delay(milliseconds: number): Promise<void> {

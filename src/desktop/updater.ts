@@ -7,11 +7,13 @@ const { autoUpdater } = electronUpdater;
 export class DesktopUpdater {
   #state: DesktopUpdateState;
   #listeners = new Set<(state: DesktopUpdateState) => void>();
+  #installing = false;
 
   constructor(currentVersion: string, private readonly onInstall: () => Promise<void> | void) {
     this.#state = { currentVersion, status: { type: "idle" } };
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
+    autoUpdater.autoRunAppAfterInstall = true;
     autoUpdater.allowPrerelease = true;
     autoUpdater.channel = "latest";
     autoUpdater.on("checking-for-update", () => this.#set({ type: "checking" }));
@@ -36,6 +38,7 @@ export class DesktopUpdater {
   }
 
   async check(): Promise<void> {
+    if (this.#state.status.type === "error" && this.#state.status.restartRequired) return;
     if (!app.isPackaged) {
       this.#set({ type: "up-to-date" });
       return;
@@ -58,9 +61,21 @@ export class DesktopUpdater {
   }
 
   async install(): Promise<void> {
-    if (this.#state.status.type !== "ready") return;
-    await this.onInstall();
-    autoUpdater.quitAndInstall(false, true);
+    if (this.#state.status.type !== "ready" || this.#installing) return;
+    this.#installing = true;
+    try {
+      await this.onInstall();
+      if (process.platform === "win32") {
+        // Launch only after Electron has closed its windows and is about to exit.
+        app.once("will-quit", () => autoUpdater.quitAndInstall(false));
+        app.quit();
+      } else {
+        autoUpdater.quitAndInstall(false);
+      }
+    } catch (error) {
+      this.#installing = false;
+      this.#setError(error, true);
+    }
   }
 
   #set(status: DesktopUpdateState["status"]): void {
@@ -68,7 +83,11 @@ export class DesktopUpdater {
     for (const listener of this.#listeners) listener(this.#state);
   }
 
-  #setError(error: unknown): void {
-    this.#set({ type: "error", message: error instanceof Error ? error.message : String(error) });
+  #setError(error: unknown, restartRequired = false): void {
+    this.#set({
+      type: "error",
+      message: error instanceof Error ? error.message : String(error),
+      ...(restartRequired ? { restartRequired: true } : {}),
+    });
   }
 }
