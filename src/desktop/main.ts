@@ -17,6 +17,7 @@ import { createDesktopWindow, fitPlaytestContentSize, isValidPlaytestViewport, w
 import { DesktopUpdater } from "./updater.js";
 import { ElectronPlaytestDriver } from "./playtest-driver.js";
 import { WebGamePlayerWindows, type WebGamePlayerTarget } from "./web-game-player.js";
+import { RendererCloseRequest } from "./renderer-close.js";
 import { PROJECT_FILE_OPEN_MODES, type ProjectFileOpenMode } from "../shared/contracts.js";
 import type { PlaytestWatchState } from "../shared/playtest.js";
 import type { WebGamePlayerRequest } from "../shared/web-game-player.js";
@@ -52,6 +53,10 @@ const webGamePlayers = new WebGamePlayerWindows((state) => {
   mainWindow?.webContents.send("ohmygame:web-game-player-state", state);
 });
 let quitting = false;
+let quitPending = false;
+let restartPending = false;
+let rendererClose: RendererCloseRequest | undefined;
+let shutdown: Promise<void> | undefined;
 let updater: DesktopUpdater | undefined;
 const oauth = new OAuthCallbackFlow(() => mainWindow?.webContents.send("ohmygame:auth-callback"));
 const windowMenuLabels = new Set(["File", "Edit", "View", "Window"]);
@@ -62,6 +67,21 @@ async function stopServices(): Promise<void> {
   agentPlaytests.close();
   await Promise.all([daemon?.stop(), oauth.cancel()]);
 }
+
+function prepareShutdown(): Promise<void> {
+  shutdown ??= (async () => {
+    if (mainWindow && !mainWindow.isDestroyed()) await rendererClose?.request();
+    quitting = true;
+    await stopServices().catch((cause) => console.error("Could not stop desktop services", cause));
+  })().catch((cause) => { shutdown = undefined; throw cause; });
+  return shutdown;
+}
+
+ipcMain.on("ohmygame:ready-to-close", (event, id: unknown, error: unknown) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || typeof id !== "number" ||
+      (error !== undefined && typeof error !== "string")) return;
+  rendererClose?.complete(id, error);
+});
 
 async function openProjectFile(filePath: string, mode: ProjectFileOpenMode): Promise<void> {
   if (mode === "reveal") {
@@ -312,7 +332,7 @@ handle("ohmygame:install-update", () => updater?.install());
 handle("ohmygame:restart-app", (event) => {
   if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Invalid restart source");
   if (quitting) return;
-  app.relaunch();
+  restartPending = true;
   app.quit();
 });
 
@@ -331,8 +351,12 @@ app.on("activate", () => {
 app.on("before-quit", (event) => {
   if (quitting || !daemon) return;
   event.preventDefault();
-  quitting = true;
-  void stopServices().finally(() => app.quit());
+  if (quitPending) return;
+  quitPending = true;
+  void prepareShutdown().then(() => {
+    if (restartPending) app.relaunch();
+    app.quit();
+  }).catch(() => { quitPending = false; restartPending = false; });
 });
 
 try {
@@ -393,10 +417,7 @@ try {
     healthTimeoutMs: 60_000,
     handlePlaytestRequest: (request, signal) => agentPlaytests.request(request, signal),
   });
-  updater = new DesktopUpdater(app.getVersion(), async () => {
-    await stopServices();
-    quitting = true;
-  });
+  updater = new DesktopUpdater(app.getVersion(), prepareShutdown);
 
   if (!useBuiltRenderer) await waitForRenderer(developmentRendererUrl);
   updater.subscribe((state) => mainWindow?.webContents.send("ohmygame:update-state", state));
@@ -422,8 +443,23 @@ async function openMainWindow(): Promise<void> {
     integratedMenuBar: true,
     beforeLoad: (window) => {
       mainWindow = window;
+      const close = new RendererCloseRequest(
+        (id) => window.webContents.send("ohmygame:prepare-close", id),
+        (id, error) => { if (!window.isDestroyed()) window.webContents.send("ohmygame:cancel-close", id, error); },
+      );
+      rendererClose = close;
+      let allowClose = false;
+      window.on("close", (event) => {
+        if (quitting || allowClose) return;
+        event.preventDefault();
+        void close.request().then(() => {
+          if (quitPending || quitting || allowClose || window.isDestroyed()) return;
+          allowClose = true;
+          window.close();
+        }).catch(() => {});
+      });
       window.once("closed", () => {
-        if (mainWindow === window) mainWindow = undefined;
+        if (mainWindow === window) { mainWindow = undefined; rendererClose = undefined; }
         webGamePlayers.close();
         for (const playtest of playtestWindows.values()) {
           void Promise.resolve(playtest).then((window) => window.close(), () => {});

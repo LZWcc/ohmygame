@@ -1,4 +1,5 @@
 import type { CanvasWorkspaceDetail } from "../shared/canvas-workspace.js";
+import { CanvasNotice } from "./canvas-notice.js";
 import { useEffect, useRef, useState, type ClipboardEvent } from "react";
 import {
   canvasCell,
@@ -402,11 +403,7 @@ export function CanvasTableConflictNotice({
   storage: CanvasTableStorage;
 }) {
   return (
-    <div className="design-notice" role="alert">
-      <span>
-        Table “{conflict.local.title}” changed elsewhere. Your draft is kept;
-        choose a version to resume saving.
-      </span>
+    <CanvasNotice className="design-notice" tone="warning" message={`Table “${conflict.local.title}” changed elsewhere. Your draft is kept; choose a version to resume saving.`}>
       <button
         type="button"
         onClick={() => storage.resolve(conflict.local.id, "remote")}
@@ -419,7 +416,7 @@ export function CanvasTableConflictNotice({
       >
         Keep my version
       </button>
-    </div>
+    </CanvasNotice>
   );
 }
 

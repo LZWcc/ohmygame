@@ -22,6 +22,21 @@ if (process.isMainFrame) {
     setAppearance: (appearance: "system" | "light" | "dark") =>
       ipcRenderer.invoke("ohmygame:set-appearance", appearance) as Promise<void>,
     restartApp: () => ipcRenderer.invoke("ohmygame:restart-app") as Promise<void>,
+    onPrepareClose: (listener: () => Promise<void>) => {
+      const callback = (_event: Electron.IpcRendererEvent, id: number) => {
+        void Promise.resolve().then(listener).then(
+          () => ipcRenderer.send("ohmygame:ready-to-close", id),
+          (cause) => ipcRenderer.send("ohmygame:ready-to-close", id, cause instanceof Error ? cause.message : String(cause)),
+        );
+      };
+      ipcRenderer.on("ohmygame:prepare-close", callback);
+      return () => ipcRenderer.removeListener("ohmygame:prepare-close", callback);
+    },
+    onCancelClose: (listener: (error: string) => void) => {
+      const callback = (_event: Electron.IpcRendererEvent, _id: number, error: string) => listener(error);
+      ipcRenderer.on("ohmygame:cancel-close", callback);
+      return () => ipcRenderer.removeListener("ohmygame:cancel-close", callback);
+    },
     windowMenu: Object.freeze({
       icon: () => ipcRenderer.invoke("ohmygame:window-menu-icon") as Promise<string>,
       popup: (label: string, x: number, y: number) =>

@@ -8,6 +8,7 @@ import { parseAppRoute } from "./routes.js";
 import { applyAppearance, readAppearance } from "./appearance.js";
 import { DesktopWindowFrame } from "./desktop-window-frame.js";
 import { initializeAnalytics } from "./analytics.js";
+import { DesktopCloseGuard } from "./desktop-close-guard.js";
 import "./styles.css";
 
 const root = document.getElementById("root");
@@ -24,4 +25,4 @@ createRoot(root).render(route.page === "playtest"
   ? <PlaytestPage projectId={route.projectId} />
   : route.page === "thumbnail"
     ? <NodeThumbnailPage projectId={route.projectId} nodeId={route.nodeId} />
-    : <DesktopWindowFrame><AuthProvider><App /></AuthProvider></DesktopWindowFrame>);
+    : <DesktopCloseGuard><DesktopWindowFrame><AuthProvider><App /></AuthProvider></DesktopWindowFrame></DesktopCloseGuard>);
