@@ -11,6 +11,7 @@ export interface WebGamePlayerState {
 export interface WebGamePlayerBridge {
   open(projectId: string, request: WebGamePlayerRequest): Promise<void>;
   state(projectId: string): Promise<WebGamePlayerState>;
+  close(projectId: string): Promise<void>;
   /** Follows a restarted development server without resetting a running game otherwise. */
   refresh(projectId: string, reload?: boolean): Promise<void>;
   onState(listener: (state: WebGamePlayerState) => void): () => void;

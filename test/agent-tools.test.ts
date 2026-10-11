@@ -75,6 +75,9 @@ describe("agent tools", () => {
     expect(createAgentTools(project, runner, projects).some(({ name }) => name === "game_use")).toBe(false);
     const playtest = { driver, resolveOpenTarget: async () => ({ runtime: "web" as const, url: "http://127.0.0.1:43210/" }) };
     if (type === "general") {
+      expect(project.webPreviewEnabled).toBe(true);
+      expect(createAgentTools(project, runner, projects, undefined, undefined, playtest).some(({ name }) => name === "game_use")).toBe(true);
+      await projects.setRunSettings(project.id, { startupDirectory: ".", startupScript: "dev", previewPath: "/", previewViewport: "fit", webPreviewEnabled: false });
       expect(createAgentTools(project, runner, projects, undefined, undefined, playtest).some(({ name }) => name === "game_use")).toBe(false);
       await projects.setRunSettings(project.id, { startupDirectory: ".", startupScript: "dev", previewPath: "/", previewViewport: "fit", webPreviewEnabled: true });
     }

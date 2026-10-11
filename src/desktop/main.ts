@@ -6,7 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import { clipboardFilePaths, loadClipboardFiles } from "./file-clipboard.js";
-import { startDaemon, type ManagedDaemon } from "./daemon-process.js";
+import { DaemonSupervisor } from "./daemon-supervisor.js";
 import { isOAuthAuthorizationUrl, OAuthCallbackFlow } from "./oauth.js";
 import { setGlobalDispatcher } from "undici/index.js";
 import { SYSTEM_PROXY_TARGET } from "../shared/network-settings.js";
@@ -26,7 +26,7 @@ const repositoryRoot = path.resolve(moduleDirectory, "../..");
 loadEnvironmentFiles(repositoryRoot, app.isPackaged ? "production" : "development");
 const developmentRendererUrl = process.env.OHMYGAME_RENDERER_URL ?? "http://127.0.0.1:43120";
 const useBuiltRenderer = app.isPackaged || process.argv.includes("--built-renderer");
-let daemon: ManagedDaemon | undefined;
+let daemon: DaemonSupervisor | undefined;
 let mainWindow: BrowserWindow | undefined;
 const playtestWindows = new Map<string, BrowserWindow | Promise<BrowserWindow>>();
 /** A Node that fails to start never reports back; its window gives up after this. */
@@ -232,10 +232,22 @@ handle("ohmygame:open-web-game-player", (event, projectId: unknown, request: unk
   }
   return webGamePlayers.open(projectId, input as WebGamePlayerRequest, () => resolvePlayerTarget(projectId));
 });
+handle("ohmygame:close-web-game-player", (event, projectId: unknown) => {
+  requirePlayerSource(event.sender, projectId);
+  webGamePlayers.closeProject(projectId);
+});
 handle("ohmygame:refresh-web-game-player", (event, projectId: unknown, reload: unknown = false) => {
   requirePlayerSource(event.sender, projectId);
   if (typeof reload !== "boolean") throw new Error("Invalid game player refresh");
   return webGamePlayers.refresh(projectId, () => resolvePlayerTarget(projectId), reload);
+});
+handle("ohmygame:runtime-state", (event) => {
+  if (!BrowserWindow.fromWebContents(event.sender) || !daemon) throw new Error("Invalid background service source");
+  return daemon.state();
+});
+handle("ohmygame:restart-runtime", (event) => {
+  if (!mainWindow || event.sender !== mainWindow.webContents || !daemon || quitting) throw new Error("Invalid background service source");
+  return daemon.restart();
 });
 
 function requirePlayerSource(sender: Electron.WebContents, projectId: unknown): asserts projectId is string {
@@ -362,7 +374,7 @@ try {
     void createdSession.setProxy(proxyConfig).catch((error) => console.warn("Could not configure session proxy", error));
   });
   await Promise.all(startupSessions.map((startupSession) => startupSession.setProxy(proxyConfig)));
-  daemon = await startDaemon({
+  daemon = new DaemonSupervisor({
     daemonEntry: path.join(moduleDirectory, "../daemon/server.js"),
     dataDirectory,
     token: randomBytes(32).toString("base64url"),
@@ -392,7 +404,17 @@ try {
     development: !useBuiltRenderer,
     healthTimeoutMs: 60_000,
     handlePlaytestRequest: (request, signal) => agentPlaytests.request(request, signal),
+    onState: (state) => {
+      if (state.status !== "ready") {
+        webGamePlayers.close();
+        agentPlaytests.close();
+      }
+      for (const window of BrowserWindow.getAllWindows()) {
+        if (!window.isDestroyed()) window.webContents.send("ohmygame:runtime-state", state);
+      }
+    },
   });
+  await daemon.start();
   updater = new DesktopUpdater(app.getVersion(), async () => {
     await stopServices();
     quitting = true;

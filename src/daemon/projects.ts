@@ -1,3 +1,4 @@
+import { PREVIEW_SETTING_KEYS, previewSettings, validPreviewSettings, validatePreviewSettings, type ProjectPreviewSettings } from "../shared/preview-settings.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { access, copyFile, cp, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
@@ -19,7 +20,7 @@ import { ProjectCovers } from "./project-covers.js";
 
 const PROJECT_LOAD_CONCURRENCY = 8;
 
-interface ProjectMetadata {
+interface ProjectMetadata extends ProjectPreviewSettings {
   version: 1;
   id: string;
   name: string;
@@ -128,7 +129,7 @@ export class ProjectManager {
       id,
       name: name?.trim() || defaultProjectName(type),
       type,
-      ...(type === "general" ? { webPreviewEnabled: false } : {}),
+      ...(type === "general" ? { webPreviewEnabled: true } : {}),
       updatedAt: new Date().toISOString(),
       ...(hasExternalWorkspace ? { workspacePath } : {}),
     };
@@ -195,6 +196,7 @@ export class ProjectManager {
 
     if (project.type !== "general" && input.webPreviewEnabled !== undefined) throw new ProjectWorkspaceError("Only General Game projects have a Web preview switch");
     if (input.webPreviewEnabled !== undefined && typeof input.webPreviewEnabled !== "boolean") throw new ProjectWorkspaceError("Web preview enabled must be a boolean");
+    try { validatePreviewSettings(input); } catch (cause) { throw new ProjectWorkspaceError((cause as Error).message); }
     const webPreviewEnabled = project.type === "general" ? input.webPreviewEnabled ?? project.webPreviewEnabled ?? false : true;
     if (!isValidStartupDirectory(input.startupDirectory)) throw new ProjectWorkspaceError("Startup directory must be a relative path inside the project workspace");
     const startupDirectory = normalizeStartupDirectory(input.startupDirectory) ?? ".";
@@ -209,12 +211,13 @@ export class ProjectManager {
       throw new ProjectWorkspaceError("Package manager is not supported");
     }
     const status = webPreviewEnabled
-      ? await resolvePreviewWorkspace({ workspacePath: project.workspacePath, startupDirectory, startupScript })
+      ? await resolvePreviewWorkspace({ workspacePath: project.workspacePath, startupDirectory, startupScript, ...previewSettings(input) })
       : undefined;
-    if (project.type === "web-game" && !status?.runnable) throw new ProjectWorkspaceError(status?.error ?? "The startup directory is not runnable");
+
     const configuredDirectory = status?.relativePath ?? startupDirectory;
 
     await this.#save(project, {
+      ...Object.fromEntries(PREVIEW_SETTING_KEYS.map((key) => [key, input[key]])),
       startupDirectory: configuredDirectory === "." ? undefined : configuredDirectory,
       startupScript: startupScript === "dev" ? undefined : startupScript,
       packageManager,
@@ -223,8 +226,8 @@ export class ProjectManager {
       ...(project.type === "general" ? { webPreviewEnabled } : {}),
       updatedAt: new Date().toISOString(),
     });
-    if (project.type === "general" && (!webPreviewEnabled || ["waiting", "stopped", "error"].includes(project.preview.status))) {
-      project.preview = { status: status?.runnable ? "stopped" : "waiting" };
+    if (project.type === "general" && (!webPreviewEnabled || ["waiting", "stopped"].includes(project.preview.status))) {
+      project.preview = { ...project.preview, status: status?.runnable ? "stopped" : "waiting" };
     }
     return project;
   }
@@ -253,6 +256,7 @@ export class ProjectManager {
       type: source.type,
       ...(source.type === "general" ? { webPreviewEnabled: source.webPreviewEnabled ?? false } : {}),
       updatedAt,
+      ...previewSettings(source),
       ...(source.startupDirectory ? { startupDirectory: source.startupDirectory } : {}),
       ...(source.startupScript ? { startupScript: source.startupScript } : {}),
       ...(source.packageManager ? { packageManager: source.packageManager } : {}),
@@ -299,7 +303,7 @@ export class ProjectManager {
     if (!project) throw new Error(`Project not found: ${id}`);
     if (project.preview.status !== "waiting" && project.preview.status !== "stopped") return project;
     const runnable = await isRunnableStartupWorkspace(project);
-    project.preview = { status: runnable ? "stopped" : "waiting" };
+    project.preview = { ...project.preview, status: runnable ? "stopped" : "waiting" };
     return project;
   }
 
@@ -656,11 +660,13 @@ export class ProjectManager {
 
   async #save(
     project: ProjectState,
-    changes: Partial<Pick<ProjectMetadata, "name" | "updatedAt" | "webPreviewEnabled" | "startupDirectory" | "startupScript" | "packageManager" | "previewPath" | "previewViewport" | "publication" | "mediaModelDefaults">>,
+    changes: Partial<Pick<ProjectMetadata, "name" | "updatedAt" | "webPreviewEnabled" | "startupDirectory" | "startupScript" | "packageManager" | "previewPath" | "previewViewport" | "publication" | "mediaModelDefaults" | keyof ProjectPreviewSettings>>,
   ): Promise<void> {
     const operation = (this.#metadataWrites.get(project.id) ?? Promise.resolve()).catch(() => {}).then(async () => {
       const metadata = { ...metadataFor(project), ...changes };
       await writeMetadata(this.#projectDirectory(project.id), metadata);
+      for (const key of PREVIEW_SETTING_KEYS) { delete project[key]; }
+      Object.assign(project, previewSettings(metadata));
       project.name = metadata.name;
       project.updatedAt = metadata.updatedAt;
       if (project.type === "general") project.webPreviewEnabled = metadata.webPreviewEnabled ?? false;
@@ -732,6 +738,7 @@ function projectState(
     ...(metadata.type === "general" ? { webPreviewEnabled: metadata.webPreviewEnabled ?? false } : {}),
     updatedAt: metadata.updatedAt,
     workspacePath,
+    ...previewSettings(metadata),
     ...(metadata.startupDirectory ? { startupDirectory: metadata.startupDirectory } : {}),
     ...(metadata.startupScript ? { startupScript: metadata.startupScript } : {}),
     ...(metadata.packageManager ? { packageManager: metadata.packageManager } : {}),
@@ -746,7 +753,7 @@ function projectState(
   };
 }
 
-async function isRunnableStartupWorkspace(project: Pick<ProjectState, "type" | "webPreviewEnabled" | "workspacePath" | "startupDirectory" | "startupScript">): Promise<boolean> {
+async function isRunnableStartupWorkspace(project: Pick<ProjectState, "type" | "webPreviewEnabled" | "workspacePath" | "startupDirectory" | "startupScript" | keyof ProjectPreviewSettings>): Promise<boolean> {
   if (project.type === "general" && !supportsWebPreview(project)) return false;
   try {
     return (await resolvePreviewWorkspace(project)).runnable;
@@ -756,14 +763,21 @@ async function isRunnableStartupWorkspace(project: Pick<ProjectState, "type" | "
 }
 
 export interface PreviewWorkspaceStatus {
+  mode?: "script" | "static" | "command";
   runnable: boolean;
   error?: string;
 }
 
 /** Resolve the configured directory and inspect its preview script in one place. */
-export async function resolvePreviewWorkspace(project: Pick<ProjectState, "workspacePath" | "startupDirectory" | "startupScript">): Promise<PreviewWorkspaceStatus & { absolutePath: string; relativePath: string }> {
+export async function resolvePreviewWorkspace(project: Pick<ProjectState, "workspacePath" | "startupDirectory" | "startupScript" | keyof ProjectPreviewSettings>): Promise<PreviewWorkspaceStatus & { absolutePath: string; relativePath: string }> {
   const directory = await resolveStartupDirectory(project.workspacePath, project.startupDirectory ?? ".");
-  return { ...directory, ...await previewWorkspaceStatus(directory.absolutePath, project.startupScript ?? "dev") };
+  if (project.previewMode === "command") return { ...directory, runnable: !!project.previewCommand?.trim(), mode: "command" as const };
+  const script = await previewWorkspaceStatus(directory.absolutePath, project.startupScript ?? "dev");
+  if (project.previewMode === "static" || ((project.previewMode ?? "auto") === "auto" && !script.runnable && await exists(path.join(directory.absolutePath, "index.html")))) {
+    const runnable = await exists(path.join(directory.absolutePath, "index.html"));
+    return { ...directory, runnable, mode: "static" as const, ...(!runnable ? { error: "This folder has no index.html to preview." } : {}) };
+  }
+  return { ...directory, ...script, mode: "script" as const };
 }
 
 export async function previewWorkspaceStatus(workspacePath: string, startupScript = "dev"): Promise<PreviewWorkspaceStatus> {
@@ -790,7 +804,25 @@ export async function previewWorkspaceStatus(workspacePath: string, startupScrip
 }
 
 function isNonServerDevCommand(command: string): boolean {
-  return /(?:^|[\s/])(?:build|check|eslint|fmt|format|lint|prettier|test|typecheck)(?:$|[\s./:])/.test(command.toLowerCase());
+  // Inspect launchers and task names, not words inside server options or paths.
+  const tokens = command.match(/&&|\|\||[;|]|(?:[^\s;&|"']+|"(?:\\.|[^"\\])*"|'[^']*')+/g) ?? [];
+  let start = 0;
+  for (let end = 0; end <= tokens.length; end++) {
+    if (end < tokens.length && !/^(?:&&|\|\||[;|])$/.test(tokens[end]!)) continue;
+    const words = tokens.slice(start, end).map((word) => word.replace(/^(["'])(.*)\1$/, "$2").toLowerCase());
+    start = end + 1;
+    if (/^(?:env|cross-env|cross-env-shell)$/.test(words[0] ?? "")) words.shift();
+    while (/^[a-z_]\w*=/.test(words[0] ?? "")) words.shift();
+    if (/^(?:npm|pnpm|yarn|bun|npx|bunx)$/.test(words[0] ?? "")) {
+      words.shift();
+      while (/^(?:--yes|-y|--no-install|--silent|-s)$/.test(words[0] ?? "")) words.shift();
+      if (/^(?:run|exec|x)$/.test(words[0] ?? "")) words.shift();
+    }
+    const launcher = path.posix.basename(words[0] ?? "");
+    if (/^(?:build|check|eslint|fmt|format|lint|prettier|test|typecheck|electron(?:-forge|-vite|-builder)?|tauri|godot4?)$/.test(launcher)) return true;
+    if (/^(?:vite|next|nuxt|astro|svelte-kit|react-scripts)$/.test(launcher) && /^(?:build|check|lint|test|typecheck)$/.test(words[1] ?? "")) return true;
+  }
+  return false;
 }
 
 export async function resolveStartupDirectory(workspacePath: string, input: string): Promise<{ absolutePath: string; relativePath: string }> {
@@ -859,6 +891,7 @@ function isPreviewViewport(value: unknown): value is PreviewViewport {
 
 function projectRunSettings(project: ProjectState): ProjectRunSettings {
   return {
+    ...previewSettings(project),
     ...(project.type === "general" ? { webPreviewEnabled: project.webPreviewEnabled ?? false } : {}),
     startupDirectory: project.startupDirectory ?? ".",
     startupScript: project.startupScript ?? "dev",
@@ -872,7 +905,7 @@ async function readMetadata(projectDirectory: string, id: string, fallbackUpdate
   try {
     const parsed = JSON.parse(await readFile(path.join(projectDirectory, "project.json"), "utf8")) as Partial<ProjectMetadata>;
     if (
-      parsed.version === 1 && parsed.id === id && typeof parsed.name === "string" && parsed.name.trim() &&
+      validPreviewSettings(parsed) && parsed.version === 1 && parsed.id === id && typeof parsed.name === "string" && parsed.name.trim() &&
       (parsed.type === undefined || isProjectType(parsed.type)) &&
       (parsed.webPreviewEnabled === undefined || typeof parsed.webPreviewEnabled === "boolean") &&
       (parsed.startupDirectory === undefined || isValidStartupDirectory(parsed.startupDirectory)) &&
@@ -896,6 +929,7 @@ async function readMetadata(projectDirectory: string, id: string, fallbackUpdate
       const workspacePath = parsed.workspacePath;
       return {
         metadata: {
+          ...previewSettings(parsed),
           version: 1,
           id,
           name: parsed.name.trim(),
@@ -925,6 +959,7 @@ async function readMetadata(projectDirectory: string, id: string, fallbackUpdate
 
 function metadataFor(project: ProjectState): ProjectMetadata {
   return {
+    ...previewSettings(project),
     version: 1,
     id: project.id,
     name: project.name,

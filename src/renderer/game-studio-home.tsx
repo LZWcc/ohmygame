@@ -1,3 +1,4 @@
+import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { useEffect, useRef, useState } from "react";
 import type {
   PluginMention,
@@ -21,7 +22,7 @@ import { ProjectCreateDialog } from "./project-create-dialog.js";
 import { projectDeletionConfirmation } from "./project-deletion.js";
 import { ProjectPromptCreator } from "./project-prompt-creator.js";
 import { ProjectRenameDialog } from "./project-rename-dialog.js";
-import { projectsHash, type AppNavigationTarget } from "./routes.js";
+import { createdProjectView, projectsHash, type AppNavigationTarget } from "./routes.js";
 import { WindowDragRegion } from "./window-drag-region.js";
 import { MAX_RECENT_PROJECTS, useProjectShelfLayout } from "./use-project-shelf-layout.js";
 import {
@@ -35,7 +36,7 @@ interface GameStudioHomeProps {
   projectType: GameStudioType;
   onNavigate: (page: AppNavigationTarget) => void;
   onCreate: (
-    projectId: string,
+    project: ProjectState,
     conversationId: string,
     prompt: string,
     mentions: PluginMention[],
@@ -43,7 +44,7 @@ interface GameStudioHomeProps {
     mode: PromptMode,
     attachments?: PromptAttachment[],
   ) => void;
-  onOpenProject: (projectId: string) => void;
+  onOpenProject: (projectId: string, view?: "design") => void;
 }
 
 export function GameStudioHome({
@@ -52,6 +53,7 @@ export function GameStudioHome({
   onCreate,
   onOpenProject,
 }: GameStudioHomeProps) {
+  const serviceGeneration = useReadyRuntimeGeneration();
   const studio = GAME_STUDIOS[projectType];
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
@@ -82,7 +84,7 @@ export function GameStudioHome({
 
   useEffect(() => {
     void load();
-  }, [projectType]);
+  }, [projectType, serviceGeneration]);
 
   async function runAction(action: () => Promise<unknown>): Promise<void> {
     setActionError(undefined);
@@ -228,7 +230,7 @@ export function GameStudioHome({
           onClose={() => setCreateOpen(false)}
           onCreated={(project) => {
             setCreateOpen(false);
-            onOpenProject(project.id);
+            onOpenProject(project.id, createdProjectView(project.type));
           }}
         />
       ) : null}
