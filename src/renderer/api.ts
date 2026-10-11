@@ -103,6 +103,8 @@ declare global {
       openExternal: (url: string) => Promise<void>;
       setAppearance: (appearance: "system" | "light" | "dark") => Promise<void>;
       restartApp?: () => Promise<void>;
+      onPrepareClose?: (listener: () => Promise<void>) => () => void;
+      onCancelClose?: (listener: (error: string) => void) => () => void;
       windowMenu?: {
         icon: () => Promise<string>;
         popup: (label: string, x: number, y: number) => Promise<void>;

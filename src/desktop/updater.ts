@@ -59,8 +59,12 @@ export class DesktopUpdater {
 
   async install(): Promise<void> {
     if (this.#state.status.type !== "ready") return;
-    await this.onInstall();
-    autoUpdater.quitAndInstall(false, true);
+    try {
+      await this.onInstall();
+      autoUpdater.quitAndInstall(false, true);
+    } catch {
+      // The renderer explains why closing was cancelled. Keep the download ready to retry.
+    }
   }
 
   #set(status: DesktopUpdateState["status"]): void {

@@ -111,6 +111,9 @@ import { CanvasDocumentNode, ExpandedCanvasDocument, type CanvasDocuments, type 
 import { CanvasNodeLabel, type CanvasNodeDetails } from "./canvas-node-label.js";
 import { exportCanvasAsset, generateCanvasText } from "./canvas-api.js";
 import type { CanvasBoardStorage } from "./canvas-board-storage.js";
+import { CanvasNotice } from "./canvas-notice.js";
+import { useDesktopClosing } from "./desktop-close-guard.js";
+import { isDesktopClosing } from "./desktop-save.js";
 import { CanvasTextarea, CanvasTextComposer } from "./canvas-text-composer.js";
 import { VideoReferencePrompt } from "./video-reference-prompt.js";
 import { resolveVideoMentions, sameVideoReference, videoReferenceAliases, videoReferenceAspectRatios, videoReferenceLimit, videoReferenceMode } from "../shared/video-references.js";
@@ -302,7 +305,7 @@ const STORY_NODE_TYPES: NodeTypes = {
   asset: AssetNode,
 };
 
-export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled, hidden = false, storage, documents, tables, assets: localAssets, conflicted = false, overlay, onSaveReady, onResolveReady, onStatusChange, onSelectionChange, expandedDocument }: {
+export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled, hidden = false, storage, documents, tables, assets: localAssets, conflicted = false, overlay, onSaveReady, onSyncReady, onResolveReady, onStatusChange, onSelectionChange, expandedDocument }: {
   project: ProjectState;
   initialNodeId?: string;
   onInitialNodeHandled?: () => void;
@@ -314,6 +317,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   conflicted?: boolean;
   overlay?: ReactNode;
   onSaveReady?: (save: (() => Promise<void>) | undefined) => void;
+  onSyncReady?: (sync: (() => Promise<void>) | undefined) => void;
   onResolveReady?: (resolve: ((version: "local" | "remote") => Promise<void>) | undefined) => void;
   onStatusChange?: (status: "loading" | "saved" | "saving" | "error" | "sync-error" | "load-error") => void;
   onSelectionChange?: (nodes: AssetCanvasNode[]) => void;
@@ -321,10 +325,12 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
 }) {
   const projectId = project.id;
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
-  const [notice, setNotice] = useState<{ kind: "save" | "sync" | "action"; message: string }>();
+  const [notice, setNotice] = useState<{ kind: "save" | "action"; message: string }>();
   const [loadError, setLoadError] = useState<string>();
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const [retrying, setRetrying] = useState(false);
+  const closing = useDesktopClosing();
+  const syncFailed = useRef(false);
+  const saveFailed = useRef(false);
   const [resolving, setResolving] = useState(false);
   const resolvingRef = useRef(false);
   const mounted = useRef(false);
@@ -400,6 +406,8 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   const queuedCanvas = useRef<string | undefined>(undefined);
   // Apply each result before the next operation reads the live canvas.
   const operationChain = useRef(Promise.resolve());
+  // A failed background read must not turn an already successful save into a failure.
+  const lastSave = useRef(Promise.resolve());
   const initialNodeRequest = useRef({ nodeId: initialNodeId, onHandled: onInitialNodeHandled });
   const editorUndoHistory = useRef<AssetCanvasDocument[]>([]);
   const editorRedoHistory = useRef<AssetCanvasDocument[]>([]);
@@ -438,6 +446,9 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
       setEditorLayout(story.editorLayout);
       setEdges(story.edges);
       queuedCanvas.current = undefined;
+      lastSave.current = Promise.resolve();
+      syncFailed.current = false;
+      saveFailed.current = false;
       setLibraryAssets(assets);
       setImageModels(models);
       setDefaultImageModel(imageCatalog.defaultModel);
@@ -462,6 +473,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   }, [projectId, storage, loadAttempt]);
 
   useEffect(() => {
+    if (closing) return;
     let active = true;
     let revision = 0;
     let model3DRevision = 0;
@@ -490,10 +502,10 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
     window.addEventListener(MODELS_CHANGED_EVENT, refresh);
     const timer = setInterval(refresh3D, 30_000);
     return () => { active = false; clearInterval(timer); window.removeEventListener(MODELS_CHANGED_EVENT, refresh); };
-  }, [projectId]);
+  }, [projectId, closing]);
 
   useEffect(() => {
-    if (phase !== "ready") return;
+    if (phase !== "ready" || closing) return;
     let stopped = false;
     let timer: number | undefined;
     const poll = async () => {
@@ -537,7 +549,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
     };
     void poll();
     return () => { stopped = true; window.clearTimeout(timer); };
-  }, [phase, projectId, project.type]);
+  }, [phase, projectId, project.type, closing]);
 
   const document = useMemo(
     () => assetCanvasDocument(viewport, nodes, edges, {
@@ -722,7 +734,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   const save = useCallback((story: AssetCanvasDocument): Promise<void> => {
     if (resolvingRef.current) return operationChain.current;
     const serialized = JSON.stringify(story);
-    if (serialized === queuedCanvas.current) return operationChain.current;
+    if (serialized === queuedCanvas.current) return lastSave.current;
     queuedCanvas.current = serialized;
     onStatusChange?.("saving");
     const operation = operationChain.current
@@ -733,10 +745,12 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
         if (mounted.current) reconcileCanvas(submitted, saved);
       });
     operationChain.current = operation;
+    lastSave.current = operation;
     void operation.then(
-      () => { if (mounted.current) { setNotice(undefined); onStatusChange?.("saved"); } },
+      () => { if (mounted.current) { saveFailed.current = false; setNotice((current) => current?.kind === "save" ? undefined : current); onStatusChange?.(syncFailed.current ? "sync-error" : "saved"); } },
       (error) => {
         if (!mounted.current) return;
+        saveFailed.current = true;
         if (queuedCanvas.current === serialized) queuedCanvas.current = undefined;
         setNotice({ kind: "save", message: `Could not save canvas: ${errorMessage(error)}` });
         onStatusChange?.("error");
@@ -771,6 +785,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   }
   const flush = useCallback(async () => {
     await pendingImport.current;
+    await operationChain.current.catch(() => {});
     while (latestCanvas.current && phase === "ready") {
       const submitted = latestCanvas.current;
       await save(submitted);
@@ -794,15 +809,18 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
         latestCanvas.current = selected; observeHistoryDocument(selected); applyEditorCanvas(selected); updateHistoryControls();
       }
       queuedCanvas.current = JSON.stringify(selected);
+      lastSave.current = Promise.resolve();
+      saveFailed.current = false;
+      syncFailed.current = false;
       setNotice(undefined);
       onStatusChange?.("saved");
     } finally { resolvingRef.current = false; setResolving(false); }
   }, [storage, onStatusChange]);
   useEffect(() => { onResolveReady?.(phase === "ready" ? resolveConflict : undefined); return () => onResolveReady?.(undefined); }, [onResolveReady, resolveConflict, phase]);
   const sync = useCallback(() => {
-    if (resolvingRef.current) return Promise.resolve();
+    if (resolvingRef.current || isDesktopClosing()) return Promise.resolve();
     const operation = operationChain.current.catch(() => {}).then(async () => {
-      if (!mounted.current || !latestCanvas.current) return;
+      if (!mounted.current || !latestCanvas.current || isDesktopClosing()) return;
       const submitted = latestCanvas.current;
       const wasSaved = queuedCanvas.current === JSON.stringify(submitted);
       const refreshed = await storage.refresh(submitted);
@@ -811,19 +829,21 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
         queuedCanvas.current = wasSaved ? JSON.stringify(refreshed) : undefined;
         reconcileCanvas(submitted, refreshed);
       }
-      setNotice((current) => current?.kind === "sync" ? undefined : current);
-      if (queuedCanvas.current === JSON.stringify(latestCanvas.current)) onStatusChange?.("saved");
+      syncFailed.current = false;
+      if (saveFailed.current) onStatusChange?.("error");
+      else if (queuedCanvas.current === JSON.stringify(latestCanvas.current)) onStatusChange?.("saved");
     });
     operationChain.current = operation;
     void operation.catch((cause) => {
-      if (!mounted.current) return;
-      setNotice((current) => current?.kind === "save" ? current : { kind: "sync", message: `Could not sync canvas. Your edits are kept. ${errorMessage(cause)}` });
-      onStatusChange?.("sync-error");
+      if (!mounted.current || isDesktopClosing()) return;
+      syncFailed.current = true;
+      if (!saveFailed.current) onStatusChange?.("sync-error");
     });
     return operation;
   }, [storage, onStatusChange]);
+  useEffect(() => { onSyncReady?.(sync); return () => onSyncReady?.(undefined); }, [onSyncReady, sync]);
   useEffect(() => {
-    if (phase !== "ready" || conflicted || resolving) return;
+    if (phase !== "ready" || conflicted || resolving || closing) return;
     let pending = false;
     const timer = window.setInterval(() => {
       if (pending) return;
@@ -831,13 +851,13 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
       void sync().catch(() => {}).finally(() => { pending = false; });
     }, 2500);
     return () => window.clearInterval(timer);
-  }, [sync, phase, conflicted, resolving]);
+  }, [sync, phase, conflicted, resolving, closing]);
 
   useEffect(() => {
-    if (phase !== "ready" || !document || resolving) return;
-    const timeout = window.setTimeout(() => { void save(document).catch(() => {}); }, 350);
+    if (phase !== "ready" || !document || resolving || closing) return;
+    const timeout = window.setTimeout(() => { if (!isDesktopClosing()) void save(document).catch(() => {}); }, 350);
     return () => window.clearTimeout(timeout);
-  }, [document, phase, save, resolving]);
+  }, [document, phase, save, resolving, closing]);
 
   useEffect(() => () => {
     const story = latestCanvas.current;
@@ -1593,11 +1613,8 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
             onDuplicate={() => { if (canvasContextMenu.nodeId) duplicateCanvasNode(canvasContextMenu.nodeId); }}
             onDelete={() => { if (canvasContextMenu.nodeId) removeCanvasNodes(new Set([canvasContextMenu.nodeId])); }}
           /> : null}
-          {notice && phase === "ready" && !conflicted ? <div className="story-save-notice" role="alert"><span>{notice.message}</span>{notice.kind === "action" ? <button type="button" onClick={() => setNotice(undefined)}>Dismiss</button> : <button type="button" disabled={retrying} onClick={() => {
-            setRetrying(true);
-            void (notice.kind === "save" ? flush() : sync()).catch(() => {}).finally(() => setRetrying(false));
-          }}>{retrying ? "Retrying…" : notice.kind === "save" ? "Retry save" : "Reload changes"}</button>}</div> : null}
-          {!notice && transferError && phase === "ready" ? <div className="story-save-notice canvas-transfer-error" role="alert"><span>{transferError}</span><button type="button" title="Dismiss error" aria-label="Dismiss error" onClick={() => setTransferError(undefined)}><X size={13} /></button></div> : null}
+          {notice && phase === "ready" && !conflicted ? <CanvasNotice className="story-save-notice" tone={notice.kind === "save" ? "error" : "neutral"} message={notice.kind === "save" ? "Could not save canvas. Your draft is kept." : "Could not complete this action."} detail={notice.message} actionLabel="Retry save" onAction={notice.kind === "save" ? flush : undefined} onDismiss={() => setNotice(undefined)} /> : null}
+          {!notice && transferError && phase === "ready" ? <CanvasNotice className="story-save-notice canvas-transfer-error" message="Could not import or paste some items." detail={transferError} onDismiss={() => setTransferError(undefined)} /> : null}
         </div>
       </div>
       {expanded && expandedDocument ? <div className="design-expanded-document" role="dialog" aria-modal="true" aria-label={expanded.title}>

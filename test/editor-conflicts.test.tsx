@@ -8,9 +8,11 @@ import { ReactFlowProvider } from "@xyflow/react";
 import type { EditorCanvas } from "../src/renderer/editor-canvas.js";
 import type { ProjectState } from "../src/shared/contracts.js";
 import { createAssetCanvasDocument } from "../src/shared/asset-canvas.js";
+import type { CanvasBoardDetail, CanvasWorkspaceDetail } from "../src/shared/canvas-workspace.js";
+import type { CanvasDocumentDetail } from "../src/shared/canvas-document.js";
+import { desktopSave } from "../src/renderer/desktop-save.js";
 import { MODEL_3D_MODELS } from "../src/shared/generation-config.js";
 import { MODEL3D_CONNECTION_ID, tripoActions } from "../src/shared/model3d-operations.js";
-import type { CanvasBoardDetail } from "../src/shared/canvas-workspace.js";
 import type {
   NodeCodebaseDetail,
   NodeCodebaseUpdate,
@@ -21,11 +23,16 @@ import { createStarterCodebaseWithScene } from "./playable-fixture.js";
 type FlowNode = Node & { title?: string };
 type CanvasProps = Parameters<typeof EditorCanvas<FlowNode>>[0];
 const captured = { props: undefined as CanvasProps | undefined };
+let canvasFlush: (() => Promise<void>) | undefined;
+let canvasSync: (() => Promise<void>) | undefined;
+const canvasStatus = vi.fn();
 const api = {
   model3DOperations: vi.fn(),
   animationActions: vi.fn(),
   balance: vi.fn(),
   getBoard: vi.fn<() => Promise<CanvasBoardDetail>>(),
+  getWorkspace: vi.fn<() => Promise<CanvasWorkspaceDetail>>(),
+  saveDocument: vi.fn<(projectId: string, detail: CanvasDocumentDetail, id?: string) => Promise<CanvasDocumentDetail>>(),
   saveBoard:
     vi.fn<
       (
@@ -81,6 +88,8 @@ vi.doMock(path.resolve("src/renderer/api.ts"), async (original) => ({
 vi.doMock(path.resolve("src/renderer/canvas-api.ts"), async (original) => ({
   ...(await original<typeof import("../src/renderer/canvas-api.js")>()),
   getCanvasBoard: api.getBoard,
+  getCanvasWorkspace: api.getWorkspace,
+  saveCanvasDocument: api.saveDocument,
   saveCanvasBoard: api.saveBoard,
   listCanvasJobs: async () => [],
 }));
@@ -95,11 +104,16 @@ const { CanvasTableStorage } =
   await import("../src/renderer/canvas-table-storage.js");
 const { CanvasBoardEditor } =
   await import("../src/renderer/asset-canvas-workspace.js");
+const { CanvasWorkspace } = await import("../src/renderer/canvas-workspace.js");
+const { useCanvasDocuments } = await import("../src/renderer/use-canvas-documents.js");
+let currentDocs: ReturnType<typeof useCanvasDocuments>;
+function DocumentHarness() { currentDocs = useCanvasDocuments("p"); return null; }
 const { PlayableEditorWorkspace } =
   await import("../src/renderer/playable-editor-workspace.js");
 const { ApiError } = await import("../src/renderer/api.js");
 
 let boardDisk: CanvasBoardDetail;
+let workspaceDisk: CanvasWorkspaceDetail;
 let storyDisk: NodeCodebaseDetail;
 let root: ReturnType<typeof createRoot>;
 let container: HTMLDivElement;
@@ -109,6 +123,7 @@ beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
   captured.props = undefined;
+  canvasFlush = undefined; canvasSync = undefined;
   api.model3DOperations.mockResolvedValue([]);
   api.animationActions.mockResolvedValue([{ id: 0, name: "Idle", category: "Daily", subCategory: "Idle" }]);
   api.balance.mockResolvedValue({ balance: 123 });
@@ -124,11 +139,14 @@ beforeEach(() => {
   ];
   canvas.editorLayout.nodes.n = { x: 0, y: 0 };
   boardDisk = { board: { ...canvas, id: "b" }, revision: "initial" };
+  workspaceDisk = { version: 1, boards: [{ id: "b", name: "Board" }], documents: [{ id: "rules", title: "Rules", markdown: "Original", revision: "initial", source: "canvas/documents/rules.md", main: false }], assets: [] };
   storyDisk = {
     ...createStarterCodebaseWithScene("Story", { width: 1280, height: 720 }),
     revision: "initial",
   };
   api.getBoard.mockImplementation(async () => structuredClone(boardDisk));
+  api.getWorkspace.mockImplementation(async () => structuredClone(workspaceDisk));
+  api.saveDocument.mockImplementation(async (_id, detail) => ({ ...detail, revision: "saved-document" }));
   api.saveBoard.mockImplementation(async (_projectId, detail) => {
     if (detail.revision !== boardDisk.revision)
       throw new ApiError("The board changed", 409);
@@ -154,10 +172,78 @@ beforeEach(() => {
   root = createRoot(container);
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
+  await act(async () => { root.unmount(); desktopSave.cancel(); });
   container.remove();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+it("saves through the desktop handshake before the debounce and pauses Canvas polling", async () => {
+  await act(async () => root.render(<CanvasWorkspace project={{ id: "p", type: "asset-canvas" } as ProjectState} />));
+  expect(captured.props?.nodes[0]?.title).toBe("Original");
+  await move("n");
+  await act(async () => desktopSave.prepare());
+  expect(boardDisk.board.nodes[0]!.position).toEqual({ x: 400, y: 400 });
+  const reads = api.getBoard.mock.calls.length, workspaces = api.getWorkspace.mock.calls.length;
+  await advance(6000);
+  expect(api.getBoard).toHaveBeenCalledTimes(reads);
+  expect(api.getWorkspace).toHaveBeenCalledTimes(workspaces);
+  await act(async () => desktopSave.cancel("Try again"));
+  await advance(3000);
+  expect(api.getBoard.mock.calls.length).toBeGreaterThan(reads);
+});
+
+it("does not claim a successful flush when a document draft has lost its workspace file", async () => {
+  await act(async () => root.render(<DocumentHarness />));
+  await act(async () => currentDocs.update("rules", { markdown: "Unsaved rules" }));
+  workspaceDisk.documents = [];
+  await act(async () => currentDocs.refresh());
+  await act(async () => { await expect(currentDocs.flush()).rejects.toThrow("Restore its workspace file"); });
+  expect(api.saveDocument).not.toHaveBeenCalled();
+  expect(localStorage.getItem("canvas-documents:p")).toContain("Unsaved rules");
+});
+
+it("shows failed sync retries once and lets Dismiss remove them", async () => {
+  await act(async () => root.render(<CanvasWorkspace project={{ id: "p", type: "asset-canvas" } as ProjectState} />));
+  await advance(400);
+  api.getBoard.mockRejectedValue(new TypeError("Failed to fetch"));
+  await advance(2500);
+  expect(container.textContent).toContain("Sync paused");
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Retry canvas sync"]')!.click());
+  expect(container.querySelectorAll(".design-notice")).toHaveLength(1);
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Dismiss notice"]')!.click());
+  await advance(3000);
+  expect(container.querySelectorAll(".design-notice")).toHaveLength(0);
+  expect(container.textContent).toContain("Sync paused");
+});
+
+it("lets the header restore a dismissed conflict so the user can choose a version", async () => {
+  await act(async () => root.render(<CanvasWorkspace project={{ id: "p", type: "asset-canvas" } as ProjectState} />));
+  boardDisk.board.nodes[0]!.title = "Agent title"; boardDisk.revision = "agent-edit";
+  await act(async () => captured.props!.onNodesChange!([{ id: "n", type: "replace", item: { ...captured.props!.nodes[0]!, title: "My title" } }]));
+  await advance(400);
+  expect(container.textContent).toContain("choose a version");
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Dismiss notice"]')!.click());
+  expect(container.querySelector(".design-notice")).toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Review canvas conflicts"]')!.click());
+  expect(container.textContent).toContain("Keep my version");
+  const keep = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Keep my version")!;
+  await act(async () => keep.click());
+  expect(boardDisk.board.nodes[0]!.title).toBe("My title");
+  expect(container.querySelector(".design-notice")).toBeNull();
+});
+
+it("still saves document drafts when the board cannot save during desktop close", async () => {
+  boardDisk.board.nodes.push({ id: "doc", type: "document", position: { x: 600, y: 0 }, data: { documentId: "rules" } });
+  boardDisk.board.editorLayout.nodes.doc = { x: 600, y: 0 };
+  await act(async () => root.render(<CanvasWorkspace project={{ id: "p", type: "asset-canvas" } as ProjectState} />));
+  const design = (captured.props!.nodes.find((node) => node.id === "doc")!.data.documentRuntime as { design: CanvasDocuments }).design;
+  await act(async () => design.update("rules", { markdown: "Latest document draft" }));
+  api.saveBoard.mockRejectedValueOnce(new Error("Board write failed"));
+  await move("n");
+  await act(async () => { await expect(desktopSave.prepare()).rejects.toThrow("Board write failed"); });
+  expect(api.saveDocument).toHaveBeenCalledWith("p", expect.objectContaining({ document: expect.objectContaining({ markdown: "Latest document draft" }) }), "rules");
+  expect(localStorage.getItem("canvas-board:p:b")).toContain('"x":400');
 });
 const advance = (milliseconds: number) =>
   act(async () => vi.advanceTimersByTimeAsync(milliseconds));
@@ -239,6 +325,9 @@ async function openCanvas(type: "web-game" | "asset-canvas") {
           add: vi.fn(),
         }}
         assets={[]}
+        onSaveReady={(save) => { canvasFlush = save; }}
+        onSyncReady={(sync) => { canvasSync = sync; }}
+        onStatusChange={canvasStatus}
       />,
     ),
   );
@@ -323,6 +412,42 @@ it("still undoes local canvas edits when no external content changed", async () 
   await undo();
   await advance(400);
   expect(boardDisk.board.nodes[0]!.position).toEqual({ x: 0, y: 0 });
+});
+
+it("can flush an already saved canvas after a failed background sync without showing a toast", async () => {
+  await openCanvas("asset-canvas");
+  await advance(400);
+  const writes = api.saveBoard.mock.calls.length;
+  api.getBoard.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  await advance(2100);
+  expect(canvasStatus).toHaveBeenLastCalledWith("sync-error");
+  expect(container.querySelector(".story-save-notice")).toBeNull();
+  await act(async () => canvasFlush!());
+  expect(api.saveBoard).toHaveBeenCalledTimes(writes);
+  await act(async () => canvasSync!());
+  expect(canvasStatus).toHaveBeenLastCalledWith("saved");
+});
+
+it("flushes an edit immediately before the autosave debounce", async () => {
+  await openCanvas("asset-canvas");
+  await move("n");
+  await act(async () => canvasFlush!());
+  expect(boardDisk.board.nodes[0]!.position).toEqual({ x: 400, y: 400 });
+});
+
+it("retries a failed save and keeps the save status after dismissing its notice", async () => {
+  await openCanvas("asset-canvas");
+  api.saveBoard.mockRejectedValueOnce(new Error("Disk unavailable"));
+  await move("n"); await advance(400);
+  expect(canvasStatus).toHaveBeenLastCalledWith("error");
+  expect(container.textContent).toContain("Could not save canvas");
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Dismiss notice"]')!.click());
+  await advance(2100);
+  expect(container.querySelector(".story-save-notice")).toBeNull();
+  expect(canvasStatus).toHaveBeenLastCalledWith("error");
+  await act(async () => canvasFlush!());
+  expect(canvasStatus).toHaveBeenLastCalledWith("saved");
+  expect(boardDisk.board.nodes[0]!.position).toEqual({ x: 400, y: 400 });
 });
 
 it("keeps the Agent graph and an independent move when a Story save conflicts", async () => {
