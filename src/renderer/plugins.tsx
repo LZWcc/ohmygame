@@ -1,5 +1,7 @@
 import { useReadyRuntimeGeneration } from "./runtime-connection.js";
-import { AddMcpPluginDialog, PluginAssistantDialog, PluginConfigurationPanel, PluginMcpPanel } from "./plugin-controls.js";
+import { AddMcpPluginDialog, PluginConfigurationPanel, PluginMcpPanel } from "./plugin-controls.js";
+import { PluginBuilderSessions } from "./plugin-builder.js";
+import { openPluginBuilder } from "./plugin-builder-navigation.js";
 import {
   Box,
   ChevronRight,
@@ -47,7 +49,6 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
   const [detailResult, setDetailResult] = useState<{ pluginId: string; plugin?: PluginDetail; error?: string }>();
   const [detailRetry, setDetailRetry] = useState(0);
   const detailRequest = useRef({ pluginId, retry: detailRetry });
-  const [assistantOpen, setAssistantOpen] = useState(false);
   const [mcpOpen, setMcpOpen] = useState(false);
   const [catalogRetry, setCatalogRetry] = useState(0);
   const [query, setQuery] = useState("");
@@ -249,7 +250,7 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
           <div className="plugins-add" ref={addMenu}>
             <button className="settings-add-button" type="button" disabled={Boolean(adding)} aria-haspopup="menu" aria-expanded={addMenuOpen} onClick={() => setAddMenuOpen((current) => !current)}>{adding ? <LoaderCircle className="spin" size={13} /> : <Plus size={13} />}{adding ? "Installing..." : "Add plugin"}</button>
             {addMenuOpen ? <div className="plugins-add-menu" role="menu">
-              <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); setAssistantOpen(true); }}><Package size={14} /><span><strong>Create with AI</strong><small>Build a plugin with the agent</small></span></button>
+              <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); void openPluginBuilder().catch(cause => setError(errorMessage(cause))); }}><Package size={14} /><span><strong>Create with AI</strong><small>Build a plugin with the agent</small></span></button>
               <button type="button" role="menuitem" onClick={() => { setAddMenuOpen(false); setMcpOpen(true); }}><Plug size={14} /><span><strong>Add MCP service...</strong><small>Connect tools through a plugin</small></span></button>
               {window.ohMyGameDesktop ? <button type="button" role="menuitem" onClick={() => void installFromFolder()}><FolderOpen size={14} /><span><strong>Install from folder...</strong><small>Choose a local plugin directory</small></span></button> : null}
               <button type="button" role="menuitem" onClick={openGitInstallDialog}><GitBranch size={14} /><span><strong>Install from Git...</strong><small>Clone a public HTTPS repository</small></span></button>
@@ -274,7 +275,7 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
       onBrowseSkill={(skillId) => detail && void browsePluginSkill(detail.id, skillId)}
       onRemove={() => detail && void removePlugin(detail)}
       onCapabilitiesChanged={capabilitiesChanged}
-      onAssist={() => setAssistantOpen(true)}
+      onAssist={() => void openPluginBuilder(pluginId).catch(cause => setError(errorMessage(cause)))}
       onMcpToggle={(id, enabled) => detail && void updatePlugin(detail, { enabled: detail.enabled, components: { ...componentSettings(detail).components, [pluginComponentKey("mcp", id)]: enabled } })}
       onTry={onTryPlugin}
     /> : <>
@@ -282,6 +283,7 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
       {phase === "loading" ? <PluginState>Loading plugins</PluginState> : null}
       {phase === "error" ? <PluginError message={error} onRetry={() => void load()} /> : null}
       {phase === "ready" ? <>
+        <PluginBuilderSessions />
         <InstalledPlugins
           plugins={installed}
           collapsible={!normalizedQuery}
@@ -289,7 +291,6 @@ export function PluginsSettings({ pluginId, onPluginChange, onTryPlugin }: {
         />
       </> : null}
     </>}
-    {assistantOpen ? <PluginAssistantDialog pluginId={pluginId} onClose={() => { setAssistantOpen(false); capabilitiesChanged(); }} onChanged={capabilitiesChanged} /> : null}
     {mcpOpen ? <AddMcpPluginDialog onClose={() => setMcpOpen(false)} onInstalled={id => { setMcpOpen(false); capabilitiesChanged(); onPluginChange(id); }} /> : null}
     {gitDialogOpen ? <div className="plugin-install-backdrop" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget && !adding) closeInstallDialog();

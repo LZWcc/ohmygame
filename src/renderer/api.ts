@@ -1113,11 +1113,33 @@ export async function createPluginSetup(pluginId?: string): Promise<import("../s
 export async function readPluginSetup(id: string): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
   return request(`/plugins/setup-sessions/${encodeURIComponent(id)}`);
 }
-export async function promptPluginSetup(id: string, prompt: string, model: AgentModelRef): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
-  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/prompt`, { method: "POST", body: JSON.stringify({ prompt, model }) });
+export async function promptPluginSetup(id: string, prompt: string, model: AgentModelRef, reasoningLevel?: import("../shared/contracts.js").AgentReasoningLevel): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/prompt`, { method: "POST", body: JSON.stringify({ prompt, model, reasoningLevel }) });
 }
 export async function abortPluginSetup(id: string): Promise<void> {
   await request(`/plugins/setup-sessions/${encodeURIComponent(id)}/abort`, { method: "POST" });
+}
+
+export async function listPluginSetups(): Promise<import("../shared/plugin-setup.js").PluginSetupSummary[]> {
+  return request("/plugins/setup-sessions");
+}
+export async function readPluginDraft(id: string): Promise<import("../shared/plugin-setup.js").PluginDraft> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/draft`);
+}
+export async function readPluginDraftFile(id: string, path: string): Promise<{ path: string; content: string }> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/file?${new URLSearchParams({ path })}`);
+}
+export async function installPluginDraft(id: string, revision: string): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/install`, { method: "POST", body: JSON.stringify({ revision }) });
+}
+export async function readPluginDraftConfiguration(id: string): Promise<import("../shared/plugins.js").PluginConfigurationView> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/configuration`);
+}
+export async function savePluginDraftConfiguration(id: string, values: import("../shared/plugins.js").PluginConfigurationValues): Promise<import("../shared/plugins.js").PluginConfigurationView> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/configuration`, { method: "PUT", body: JSON.stringify({ values }) });
+}
+export async function testPluginDraft(id: string, server: string, revision: string): Promise<import("../shared/plugins.js").PluginMcpResult> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/test/${encodeURIComponent(server)}`, { method: "POST", body: JSON.stringify({ revision }) });
 }
 export async function readPluginMcpDefinition(id: string, server: string): Promise<{ definition: import("../shared/plugins.js").McpServerDefinition }> {
   return request(`/plugins/${encodeURIComponent(id)}/mcp/${encodeURIComponent(server)}/definition`);
