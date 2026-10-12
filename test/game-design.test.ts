@@ -215,14 +215,17 @@ describe("Markdown design workspace", () => {
     await expect(store.setMainDocument(project.id, doc.document.id)).rejects.toMatchObject({ statusCode: 409 });
     expect((await checkCanvasWorkspace(project.workspacePath)).ok).toBe(true);
   });
-  it("reports a fixed size on a content-sized node with its node ID", async () => {
-    const { project, boardId } = await runtime(fakeGenerator, "asset-canvas");
+  it("opens boards with a legacy size on a content-sized node and reports it", async () => {
+    const { store, project, boardId } = await runtime(fakeGenerator, "asset-canvas");
     const canvas = path.join(project.workspacePath, "canvas");
     await writeFile(path.join(canvas, `boards/${boardId}.json`), JSON.stringify({ version: 1, id: boardId, viewport: { width: 1280, height: 720 }, edges: [],
       nodes: [{ id: "boat", type: "image", data: { prompt: "", resolution: "1K", aspectRatio: "1:1", images: [] } }] }));
     await writeFile(path.join(canvas, `editor/${boardId}.json`), JSON.stringify({ version: 1, nodes: { boat: { x: 0, y: 0, width: 330, height: 320 } }, viewport: { x: 0, y: 0, zoom: 1 }, view: "canvas" }));
+    const { board } = await store.board(project.id, boardId);
+    expect(board.nodes[0]).not.toHaveProperty("width");
+    expect(board.editorLayout.nodes.boat).toEqual({ x: 0, y: 0 });
     const result = await checkCanvasWorkspace(project.workspacePath);
-    expect(result.issues).toEqual([expect.objectContaining({ message: expect.stringContaining("Node boat: image nodes size to their content") })]);
+    expect(result.issues).toEqual([{ file: `canvas/editor/${boardId}.json`, message: expect.stringContaining("Node boat: image nodes size to their content") }]);
   });
   it("keeps Markdown canonical and rejects stale saves after disk edits", async () => {
     const { store, project } = await runtime();

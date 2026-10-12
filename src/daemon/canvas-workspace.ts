@@ -1,6 +1,6 @@
 import { CANVAS_TABLE_SCHEMA, createCanvasTable, isCanvasTable, canvasTablePath, type CanvasTable, type CanvasTableDetail } from "../shared/canvas-table.js";
 import { createHash, randomUUID } from "node:crypto";
-import { applyCanvasNodeLayout, canvasNodeContent, canvasNodeLayout } from "../shared/canvas-node-layout.js";
+import { applyCanvasNodeLayout, canvasNodeContent, canvasNodeLayout, contentNodeSizeIssue, isResizableCanvasNodeType } from "../shared/canvas-node-layout.js";
 import { resolveVideoMentions } from "../shared/video-references.js";
 import { lstat, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -155,17 +155,28 @@ async function writeCanvasTable(workspace: string, table: CanvasTable): Promise<
   return { table, revision: revision(text) };
 }
 export async function readCanvasBoard(workspace: string, id: string): Promise<CanvasBoardDetail | undefined> {
+  return (await inspectCanvasBoard(workspace, id))?.detail;
+}
+/** Reads a board and lists tolerated problems that canvas_check reports but the editor ignores. */
+export async function inspectCanvasBoard(workspace: string, id: string): Promise<{ detail: CanvasBoardDetail; issues: string[] } | undefined> {
   const name = `boards/${validId(id)}.json`, text = await readCanvasFile(workspace, name);
   if (text === undefined) return undefined;
   const raw = parseCanvasJson<Omit<CanvasBoard, "editorLayout">>(text, name, CANVAS_BOARD_SCHEMA);
   const layoutName = `editor/${id}.json`, layoutText = await readCanvasFile(workspace, layoutName);
   const layout = layoutText === undefined ? createAssetCanvasDocument().editorLayout : parseCanvasJson<CanvasBoard["editorLayout"]>(layoutText, layoutName, CANVAS_LAYOUT_SCHEMA);
-  const editorLayout = fitCanvasLayout(raw.nodes, layout);
+  const editorLayout = fitCanvasLayout(raw.nodes, layout), issues: string[] = [];
+  for (const node of raw.nodes) {
+    const { width, height, ...position } = editorLayout.nodes[node.id]!;
+    if (isResizableCanvasNodeType(node.type) || (width === undefined && height === undefined)) continue;
+    // Older agent edits could size content-sized nodes; ignore the size so those boards still open.
+    editorLayout.nodes[node.id] = position;
+    issues.push(contentNodeSizeIssue(node));
+  }
   const board = { ...raw, editorLayout, nodes: raw.nodes.map((node) => applyCanvasNodeLayout(node, editorLayout.nodes[node.id]!)) };
   try { validateAssetCanvasDocument(board); }
   catch (cause) { throw new CanvasError(`canvas/${name}: ${cause instanceof Error ? cause.message : String(cause)}`); }
   if (!isCanvasBoard(board) || board.id !== id) throw new CanvasError(`canvas/${name}: invalid node IDs or references`);
-  return { board, revision: revision([text, layoutText ?? ""]) };
+  return { detail: { board, revision: revision([text, layoutText ?? ""]) }, issues };
 }
 async function writeCanvasBoard(workspace: string, board: CanvasBoard): Promise<CanvasBoardDetail> {
   if (!isCanvasBoard(board)) throw new CanvasError("Invalid canvas board");

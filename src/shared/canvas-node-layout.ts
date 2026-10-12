@@ -11,6 +11,20 @@ export function isResizableCanvasNodeType(type: AssetCanvasNodeType): type is ke
   return Object.hasOwn(RESIZABLE_CANVAS_NODE_SIZES, type);
 }
 
+export function contentNodeSizeIssue(node: Pick<AssetCanvasNode, "id" | "type">): string {
+  return `Node ${node.id}: ${node.type} nodes size to their content; remove width/height from its editor layout (only ${Object.keys(RESIZABLE_CANVAS_NODE_SIZES).join(", ")} nodes are resizable)`;
+}
+
+/**
+ * Drops a stored size from a node that sizes to its content. Boards written before validation
+ * rejected these sizes still load; the size is ignored instead of fixing the node frame.
+ */
+export function withoutContentNodeSize<T extends Pick<AssetCanvasNode, "type" | "width" | "height">>(node: T): T {
+  if (isResizableCanvasNodeType(node.type) || (node.width === undefined && node.height === undefined)) return node;
+  const { width: _width, height: _height, ...rest } = node;
+  return rest as T;
+}
+
 export function canvasNodeLayout(
   node: Pick<AssetCanvasNode, "position" | "width" | "height">,
 ): AssetCanvasNodeLayout {

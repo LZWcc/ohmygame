@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAssetCanvasDocument, isAssetCanvasDocument, validateAssetCanvasDocument } from "../src/shared/asset-canvas.js";
+import { createAssetCanvasDocument, isAssetCanvasDocument, validateAssetCanvasDocument, withoutContentNodeSizes } from "../src/shared/asset-canvas.js";
 import { canvasHistoryKey, model3DViewLabels, toAssetCanvasNode } from "../src/renderer/asset-canvas-workspace.js";
 import type { Model3DModel } from "../src/shared/contracts.js";
 import { model3DModel } from "../src/shared/custom-models.js";
@@ -25,6 +25,12 @@ describe("Asset Canvas node serialization", () => {
     canvas.nodes[0]!.width = 330; canvas.editorLayout.nodes.boat = { x: 0, y: 0, width: 330 };
     expect(isAssetCanvasDocument(canvas)).toBe(false);
     expect(() => validateAssetCanvasDocument(canvas)).toThrow("Node boat: asset nodes size to their content");
+    canvas.nodes.push({ id: "notes", type: "text", position: { x: 0, y: 0 }, width: 600, height: 400, data: { text: "", instruction: "" } });
+    canvas.editorLayout.nodes.notes = { x: 0, y: 0, width: 600, height: 400 };
+    const restored = withoutContentNodeSizes(canvas);
+    expect(isAssetCanvasDocument(restored)).toBe(true);
+    expect(restored.editorLayout.nodes).toEqual({ boat: { x: 0, y: 0 }, notes: { x: 0, y: 0, width: 600, height: 400 } });
+    expect(restored.nodes[1]).toMatchObject({ width: 600, height: 400 });
   });
   it("uses protocol-specific reference labels rather than applying directions to every provider", () => {
     expect(model3DViewLabels(model3DModel("hyper3d", "Hyper3D", MODEL_3D_PRESETS.hyper3d[0]!))).toEqual(["Reference 1", "Reference 2", "Reference 3", "Reference 4", "Reference 5"]);

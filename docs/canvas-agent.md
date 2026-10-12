@@ -35,8 +35,9 @@ references require a language model that accepts images. A node cannot reference
 itself or, for Document nodes, another node pointing to the same document.
 
 Positions, zoom and the width/height of text, document and table nodes live in
-`editor/`. Media and generation nodes size to their content, so a width/height
-on them fails validation. New nodes get positions automatically.
+`editor/`. Media and generation nodes size to their content: the editor ignores
+a width/height on them and canvas_check reports it. New nodes get positions
+automatically.
 The agent usually edits only the semantic files. Deleting a board or node
 keeps its documents, tables and media.
 
