@@ -7,6 +7,7 @@ import type { AssetLibrary } from "./asset-library.js";
 import type { ProjectManager } from "./projects.js";
 import type { ProjectState } from "../shared/contracts.js";
 import { getWorkspaceMedia } from "./workspace.js";
+import { readMediaDimensions } from "./media-dimensions.js";
 import { CanvasError, parseCanvasJson, readCanvasFile, writeCanvasJson } from "./canvas-files.js";
 
 export async function readCanvasAssets(workspace: string): Promise<CanvasAssetManifest> {
@@ -57,7 +58,8 @@ export async function inspectCanvasAssets(workspace: string, manifest: CanvasAss
 
 async function resolveCanvasAsset(workspace: string, id: string, asset: CanvasAsset): Promise<CanvasAssetCatalogEntry> {
   const file = await getWorkspaceMedia(workspace, asset.path), info = await stat(file.absolutePath);
-  return { ...asset, id, contentType: file.contentType, mediaType: file.mediaType, size: info.size, createdAt: info.mtime.toISOString() };
+  const dimensions = file.mediaType === "image" || file.mediaType === "video" ? await readMediaDimensions(file.absolutePath) : undefined;
+  return { ...asset, id, contentType: file.contentType, mediaType: file.mediaType, size: info.size, createdAt: info.mtime.toISOString(), ...dimensions };
 }
 
 export async function canvasLibraryAsset(project: ProjectState, library: AssetLibrary, id: string): Promise<string> {

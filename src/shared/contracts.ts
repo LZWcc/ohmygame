@@ -858,6 +858,9 @@ export interface LibraryAsset {
   contentType: string;
   createdAt: string;
   duration?: number;
+  /** Pixel dimensions of image and video content, read from the file header. */
+  width?: number;
+  height?: number;
   prompt?: string;
   origin?: LibraryAssetOrigin;
   purpose?: LibraryAssetPurpose;

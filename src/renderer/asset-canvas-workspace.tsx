@@ -212,6 +212,8 @@ type AssetCanvasFlowData = {
   model3DOptions?: Model3DOptions;
   contentType?: string;
   assetDuration?: number;
+  /** Width / height of the output media, known before it loads. */
+  assetAspectRatio?: number;
   name?: string;
   assetOrigin?: "Project" | "Library";
   assetError?: string;
@@ -1325,7 +1327,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
         start: beginHistoryGesture, end: finishHistoryGesture,
         reset: () => { beginHistoryGesture(); setNodes((current) => current.map((node) => { if (node.id !== original.id) return node; const { width: _width, height: _height, ...rest } = node; return rest; })); finishHistoryGesture(); },
         ...(original.type === "text" ? { open: () => setExpandedTextId(original.id) } : {}),
-      } } : {}), panelOpen: original.selected === true && !marqueeActive && !marqueeSelectedIds.has(original.id), nodeDetails: {
+      } } : {}), assetAspectRatio: mediaAspectRatio(libraryAssets.find((asset) => asset.id === original.data.assetId)), panelOpen: original.selected === true && !marqueeActive && !marqueeSelectedIds.has(original.id), nodeDetails: {
       title: original.title?.trim(), label: canvasNodeTitle(toAssetCanvasNode(original, model3DModels), documents.documents, libraryAssets, tableContents), description: original.description,
       edit: () => setNodeDetails({ id: original.id, title: original.title ?? "", description: original.description ?? "" }),
     } } };
@@ -1718,7 +1720,7 @@ function ImageNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "dat
   }
 
   return (
-    <MediaNodeShell kind="image" selected={selected} panelOpen={data.panelOpen} assetId={data.assetId} aspectRatio={data.aspectRatio} runtime={runtime} details={data.nodeDetails}>
+    <MediaNodeShell kind="image" selected={selected} panelOpen={data.panelOpen} assetId={data.assetId} assetAspectRatio={data.assetAspectRatio} aspectRatio={data.aspectRatio} runtime={runtime} details={data.nodeDetails}>
       <MediaReferenceStrip runtime={runtime} />
       <MediaPrompt
         kind="image"
@@ -1801,7 +1803,7 @@ function VideoNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "dat
   }
 
   return (
-    <MediaNodeShell kind="video" selected={selected} panelOpen={data.panelOpen} assetId={data.assetId} aspectRatio={data.videoAspectRatio} runtime={runtime} details={data.nodeDetails}>
+    <MediaNodeShell kind="video" selected={selected} panelOpen={data.panelOpen} assetId={data.assetId} assetAspectRatio={data.assetAspectRatio} aspectRatio={data.videoAspectRatio} runtime={runtime} details={data.nodeDetails}>
       <MediaReferenceStrip runtime={runtime ? { ...runtime, slotLabels: mode === "frame" ? ["First frame", "Last frame"] : mentionOptions.map((option) => `@${option.alias}`) } : undefined} />
       <VideoReferencePrompt
         value={data.prompt ?? ""}
@@ -1937,7 +1939,7 @@ function AssetNode({ data, selected }: Pick<NodeProps<AssetCanvasFlowNode>, "dat
   const kind = data.mediaType ?? "image";
   const preview = useWorkspaceAssetUrl(undefined, "", 0, kind === "audio" ? undefined : data.assetId);
   const Icon = kind === "video" ? Film : kind === "audio" ? Music2 : kind === "model" ? Box : ImageIcon;
-  const mediaLayout = useMediaNodeLayout(kind === "audio" || kind === "model" ? undefined : preview.url);
+  const mediaLayout = useMediaNodeLayout(kind === "audio" || kind === "model" ? undefined : preview.url, data.assetAspectRatio);
   const style = kind === "audio" ? { "--story-media-width": "300px", "--story-media-height": "92px" } as CSSProperties : mediaLayout.style;
   return (
     <div className={`story-node story-media-node story-library-asset-node story-library-${kind}-node${selected ? " is-selected" : ""}`} style={style}>
@@ -2200,11 +2202,12 @@ function TextReferenceThumbnail({ runtime }: { runtime: Pick<MediaNodeRuntime, "
   );
 }
 
-function MediaNodeShell({ kind, selected, panelOpen, assetId, aspectRatio, runtime, details, emptyHint, children }: {
+function MediaNodeShell({ kind, selected, panelOpen, assetId, assetAspectRatio, aspectRatio, runtime, details, emptyHint, children }: {
   kind: "image" | "video" | "model" | "animation";
   selected: boolean;
   panelOpen?: boolean;
   assetId?: string;
+  assetAspectRatio?: number;
   aspectRatio?: ImageAspectRatio | VideoAspectRatio;
   runtime?: MediaNodeRuntime;
   details?: CanvasNodeDetails;
@@ -2215,7 +2218,7 @@ function MediaNodeShell({ kind, selected, panelOpen, assetId, aspectRatio, runti
   const Icon = kind === "image" ? ImageIcon : kind === "video" ? Film : kind === "animation" ? WandSparkles : Box;
   const label = kind === "image" ? "Image" : kind === "video" ? "Video" : kind === "animation" ? "Animate 3D" : "Model 3D";
   const threeD = kind === "model" || kind === "animation";
-  const mediaLayout = useMediaNodeLayout(threeD ? undefined : preview.url, aspectRatio);
+  const mediaLayout = useMediaNodeLayout(threeD ? undefined : preview.url, assetAspectRatio ?? parseAspectRatio(aspectRatio));
   return (
     <div className={`story-node story-media-node story-generation-media-node${selected ? " is-selected" : ""}`} style={mediaLayout.style}>
       <CanvasNodeLabel icon={Icon} label={label} details={details} />
@@ -2352,14 +2355,14 @@ function formatMediaTime(seconds: number): string {
   return `${minutes}:${String(wholeSeconds % 60).padStart(2, "0")}`;
 }
 
-function useMediaNodeLayout(source?: string, fallbackAspectRatio?: ImageAspectRatio | VideoAspectRatio): {
+/** Sizes a media card from the loaded media, else from the ratio known in advance. */
+function useMediaNodeLayout(source?: string, knownAspectRatio?: number): {
   style: CSSProperties;
   onImageLoad: (event: SyntheticEvent<HTMLImageElement>) => void;
   onVideoMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void;
 } {
   const [intrinsic, setIntrinsic] = useState<{ source?: string; ratio: number }>();
-  const fallback = parseAspectRatio(fallbackAspectRatio);
-  const size = fitMediaNode(intrinsic && intrinsic.source === source ? intrinsic.ratio : fallback);
+  const size = fitMediaNode(intrinsic && intrinsic.source === source ? intrinsic.ratio : knownAspectRatio);
 
   function remember(width: number, height: number): void {
     if (width > 0 && height > 0) setIntrinsic({ source, ratio: width / height });
@@ -2373,6 +2376,10 @@ function useMediaNodeLayout(source?: string, fallbackAspectRatio?: ImageAspectRa
     onImageLoad: (event) => remember(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight),
     onVideoMetadata: (event) => remember(event.currentTarget.videoWidth, event.currentTarget.videoHeight),
   };
+}
+
+function mediaAspectRatio(asset?: Pick<LibraryAsset, "width" | "height">): number | undefined {
+  return asset?.width && asset.height ? asset.width / asset.height : undefined;
 }
 
 function parseAspectRatio(value?: ImageAspectRatio | VideoAspectRatio): number | undefined {
