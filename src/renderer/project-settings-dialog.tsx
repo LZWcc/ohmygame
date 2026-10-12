@@ -117,11 +117,17 @@ export function ProjectSettingsDialogFrame({
 export function ProjectSettingsDialog({
   project,
   previewUrl: currentPreviewUrl,
+  previewActions,
   onClose,
   onSaved,
 }: {
   project: ProjectState;
   previewUrl?: string;
+  previewActions?: {
+    onRestart: (reinstall?: boolean) => void;
+    onStop?: () => void;
+    onLogs: () => void;
+  };
   onClose: () => void;
   onSaved: (project: ProjectState) => Promise<void> | void;
 }) {
@@ -130,6 +136,9 @@ export function ProjectSettingsDialog({
   const [webPreviewEnabled, setWebPreviewEnabled] = useState(
     supportsWebPreview(project),
   );
+  const previewStartDisabled =
+    project.preview.status === "starting" ||
+    project.preview.status === "waiting";
   const [startupDirectory, setStartupDirectory] = useState(
     project.startupDirectory ?? ".",
   );
@@ -521,6 +530,62 @@ export function ProjectSettingsDialog({
             </label>
           </fieldset>
         </details>
+        {previewActions ? (
+          <details className="project-settings-fold">
+            <summary>
+              Preview actions
+              <ChevronDown size={14} aria-hidden="true" />
+            </summary>
+            <fieldset
+              className="project-settings-preview-actions"
+              disabled={saving}
+            >
+              <button
+                className="project-settings-browser"
+                type="button"
+                disabled={previewStartDisabled}
+                onClick={() => previewActions.onRestart()}
+              >
+                {project.preview.status === "ready"
+                  ? "Restart preview service"
+                  : "Start preview"}
+              </button>
+              {previewActions.onStop ? (
+                <button
+                  className="project-settings-browser"
+                  type="button"
+                  disabled={
+                    !["ready", "starting"].includes(project.preview.status)
+                  }
+                  onClick={previewActions.onStop}
+                >
+                  {project.preview.status === "starting"
+                    ? "Cancel startup"
+                    : "Stop preview"}
+                </button>
+              ) : null}
+              <button
+                className="project-settings-browser"
+                type="button"
+                onClick={previewActions.onLogs}
+              >
+                Preview logs
+              </button>
+              {(project.previewMode ?? "auto") !== "static" &&
+              project.previewMode !== "command" &&
+              project.preview.command !== "Serve static files" ? (
+                <button
+                  className="project-settings-browser"
+                  type="button"
+                  disabled={previewStartDisabled}
+                  onClick={() => previewActions.onRestart(true)}
+                >
+                  Reinstall dependencies and restart
+                </button>
+              ) : null}
+            </fieldset>
+          </details>
+        ) : null}
         {webPreviewEnabled && previewUrl ? (
           <button
             className="project-settings-browser"

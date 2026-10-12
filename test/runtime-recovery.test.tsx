@@ -510,17 +510,39 @@ describe("pane and preview boundaries", () => {
     expect(container.querySelector("iframe")).toBe(frame);
     expect(new URL(frame.src).pathname).toBe("/");
     expect(container.querySelector(".preview-location-path")?.textContent).toBe("/scene-2?level=2#boss");
-    const browser = [...container.querySelectorAll("button")].find((button) => button.textContent === "Open in browser")!;
+    await act(async () => (container.querySelector('[aria-label="Project settings"]') as HTMLButtonElement).click());
+    const browser = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Open preview in browser")!;
     await act(async () => browser.click());
     const url = new URL(String(open.mock.calls[0][0]));
     expect(`${url.pathname}?level=${url.searchParams.get("level")}${url.hash}`).toBe("/scene-2?level=2#boss");
-    expect(container.querySelector(".preview-run-menu")?.hasAttribute("open")).toBe(false);
+    expect(container.querySelector(".preview-run-menu")).toBeNull();
+    await act(async () => (container.querySelector('.project-settings-dialog [aria-label="Close"]') as HTMLButtonElement).click());
     await act(async () => (container.querySelector('[aria-label="Reload preview"]') as HTMLButtonElement).click());
     expect(container.querySelector("iframe")).not.toBe(frame);
     const reloaded = new URL(container.querySelector("iframe")!.src);
     expect(reloaded.pathname).toBe("/scene-2");
     expect(reloaded.searchParams.get("level")).toBe("2");
     expect(reloaded.hash).toBe("#boss");
+  });
+
+  it("opens preview logs from Code without changing the active view", async () => {
+    installDesktop();
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json([])));
+    const { CodingWorkspace } = await import("../src/renderer/coding-workspace.js");
+    const { updateRuntimeConnection } = await import("../src/renderer/runtime-connection.js");
+    updateRuntimeConnection(ready(1));
+    const project: ProjectState = { id: "logs", name: "Logs", type: "web-game", updatedAt: new Date(0).toISOString(), workspacePath: "/tmp/logs", preview: { status: "stopped", logs: "Preview was stopped." } };
+    await act(async () => root.render(createElement(CodingWorkspace, { project, agentBusy: false, publishing: false, workspaceRevision: 0, onPublish: async () => false, onOpenPublish: () => {}, onClosePublish: () => {}, onRestart: () => {} })));
+    await act(async () => (container.querySelector('.workspace-tab[title="Code"]') as HTMLButtonElement).click());
+    await act(async () => (container.querySelector('[aria-label="Project settings"]') as HTMLButtonElement).click());
+    const logs = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Preview logs")!;
+    await act(async () => logs.click());
+    expect(container.querySelector(".coding-workspace")?.getAttribute("data-active-tab")).toBe("code");
+    expect(container.querySelector(".project-settings-dialog")).toBeNull();
+    expect(container.querySelector(".coding-workspace > .preview-logs")?.textContent).toContain("Preview was stopped.");
+    await act(async () => (container.querySelector('[aria-label="Close preview logs"]') as HTMLButtonElement).click());
+    expect(container.querySelector(".preview-logs")).toBeNull();
+    expect(container.querySelector(".coding-workspace")?.getAttribute("data-active-tab")).toBe("code");
   });
 
   it("keeps sibling input available when a pane throws and permits a retry", async () => {
