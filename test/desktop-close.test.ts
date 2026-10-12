@@ -44,7 +44,7 @@ vi.doMock(path.resolve("src/desktop/web-game-player.ts"), () => ({ WebGamePlayer
 vi.doMock(path.resolve("src/desktop/updater.ts"), () => ({ DesktopUpdater: class {
   constructor(_version: string, install: () => Promise<void>) { host.install = install; }
   subscribe() {} check() {}
-} }));
+}, DesktopUpdatePreparationError: class extends Error {} }));
 vi.doMock(path.resolve("src/desktop/window.ts"), () => ({
   createDesktopWindow: async (options: { hidden?: boolean; beforeLoad(window: unknown): void }) => {
     host.options = options as unknown as Record<string, unknown>;
@@ -146,6 +146,13 @@ it("requires the same save acknowledgement before installing an update", async (
   expect(host.stopped).not.toHaveBeenCalled();
   acknowledge(); await installing;
   expect(host.stopped).toHaveBeenCalledOnce();
+});
+it("blocks an update when background services cannot stop safely", async () => {
+  host.stopped.mockRejectedValueOnce(new Error("Service is still writing"));
+  const installing = host.install!();
+  acknowledge();
+  await expect(installing).rejects.toThrow();
+  expect(host.quit).not.toHaveBeenCalled();
 });
 
 it("cancels active and queued thumbnail captures and frees slots for the next batch", async () => {

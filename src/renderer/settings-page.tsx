@@ -86,7 +86,7 @@ export function SettingsPage({ section, pluginId, onBack, onSectionChange, onPlu
           {section === "web-search" ? <WebSearchSettingsPanel /> : null}
           {section === "network" ? <NetworkSettingsPanel /> : null}
           {section === "plugins" ? <PluginsSettings pluginId={pluginId} onPluginChange={onPluginChange} onTryPlugin={onTryPlugin} /> : null}
-          {section === "about" ? <AboutSettings /> : null}
+          {section === "about" ? <AboutSettings onOpenNetwork={() => chooseSection("network")} /> : null}
         </div>
       </section>
     </main>
@@ -225,8 +225,9 @@ function AccountSettings() {
   );
 }
 
-function AboutSettings() {
+function AboutSettings({ onOpenNetwork }: { onOpenNetwork: () => void }) {
   const [update, setUpdate] = useState<DesktopUpdateState | null>(null);
+  const [copied, setCopied] = useState(false);
   const updates = window.ohMyGameDesktop?.updates;
   useEffect(() => {
     if (!updates) return;
@@ -241,8 +242,25 @@ function AboutSettings() {
       : status?.type === "available" ? `Update available: ${status.version}`
         : status?.type === "downloading" ? `Downloading update (${status.percent}%)`
           : status?.type === "ready" ? `Ready to restart: ${status.version}`
-            : status?.type === "error" ? status.message : "Not checked yet";
-  const busy = status?.type === "checking" || status?.type === "downloading";
+            : status?.type === "installing" ? "Preparing a safe restart..."
+              : status?.type === "error" ? status.title : "Not checked yet";
+  const busy = status?.type === "checking" || status?.type === "downloading" || status?.type === "installing";
+  const retry = () => {
+    if (status?.type !== "error" || !updates) return;
+    if (status.retry === "download") void updates.download();
+    else if (status.retry === "install") void updates.install();
+    else void updates.check();
+  };
+  const copyDetails = async () => {
+    if (status?.type !== "error") return;
+    await navigator.clipboard.writeText([
+      `OhMyGame ${update?.currentVersion ?? __APP_VERSION__}`,
+      `Update ${status.phase}/${status.code}`,
+      status.detail,
+    ].join("\n"));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 2_000);
+  };
   return (
     <section className="settings-panel settings-overview-panel">
       <header className="settings-panel-header"><h3>About</h3></header>
@@ -254,14 +272,30 @@ function AboutSettings() {
         <div className="settings-about-row">
           <span>Updates</span>
           <div className="settings-about-update">
-            <span className="settings-about-status">{message}</span>
+            <div className="settings-about-status">
+              <span>{message}</span>
+              {status?.type === "error" ? (
+                <div className="settings-update-error" role="alert">
+                  <p>{status.message}</p>
+                  {status.dataSafe ? <p className="settings-update-data-safe">Your projects and conversations were not deleted.</p> : null}
+                  <details>
+                    <summary>Technical details</summary>
+                    <code>{status.detail}</code>
+                  </details>
+                </div>
+              ) : null}
+            </div>
             {updates ? (
               <div className="settings-about-actions">
                 {status?.type === "available" ? <button className="settings-primary-button" type="button" onClick={() => void updates.download()}>Download update</button> : null}
                 {status?.type === "ready" ? <button className="settings-primary-button" type="button" onClick={() => void updates.install()}>Restart to update</button> : null}
-                <button className="settings-secondary-button" type="button" disabled={busy} onClick={() => void updates.check()}>
-                  {status?.type === "error" ? "Check again" : "Check for updates"}
-                </button>
+                {status?.type === "error" ? <>
+                  <button className="settings-primary-button" type="button" onClick={retry}>Try again</button>
+                  {status.code === "network" ? <button className="settings-secondary-button" type="button" onClick={onOpenNetwork}>Network settings</button> : null}
+                  <button className="settings-secondary-button" type="button" onClick={() => void copyDetails()}>{copied ? "Copied" : "Copy details"}</button>
+                </> : (
+                  <button className="settings-secondary-button" type="button" disabled={busy} onClick={() => void updates.check()}>Check for updates</button>
+                )}
               </div>
             ) : null}
           </div>
