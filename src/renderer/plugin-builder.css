@@ -1,16 +1,5 @@
 .plugin-builder-shell { min-width: 0; }
-.plugin-builder-intro { margin: 24px 0; }
-.plugin-builder-intro h1 { margin: 0 0 8px; font-size: 14px; font-weight: 600; line-height: 1.5; }
-.plugin-builder-intro > p { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.7; }
-.plugin-builder-starters { display: grid; gap: 2px; margin-top: 18px; }
-.plugin-builder-starters > button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 8px; border: 0; border-radius: var(--radius); background: transparent; color: var(--text-secondary); font: inherit; font-size: 11px; text-align: left; cursor: pointer; }
-.plugin-builder-starters > button:hover { background: var(--surface-hover); color: var(--text); }
-.plugin-builder-starters > button > svg { flex-shrink: 0; }
-.plugin-builder-starters > button > svg:last-child { margin-left: auto; }
 .plugin-builder-icon { display: inline-flex; color: var(--text-muted); }
-.plugin-builder-status { display: flex; align-items: center; gap: 8px; max-width: 260px; color: var(--text-muted); font-size: 10px; white-space: nowrap; }
-.plugin-builder-status > span { overflow: hidden; text-overflow: ellipsis; }
-.plugin-builder-status > small { flex-shrink: 0; font-size: 9px; }
 .plugin-builder-shell .composer > :is(.plugin-builder-notice, .plugin-builder-error) { margin: 0 2px 8px; padding: 0; background: transparent; font-size: 10px; line-height: 1.5; }
 .plugin-builder-working { display: flex; align-items: center; gap: 8px; margin: 18px 0; color: var(--text-muted); font-size: 12px; }
 .plugin-builder-error { padding: 12px; margin: 12px 0; border-radius: 6px; background: color-mix(in srgb, var(--danger) 7%, transparent); color: var(--danger); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
@@ -80,8 +69,8 @@
 .plugin-builder-recents small { color: var(--text-muted); font-size: 10px; }
 .plugin-builder-recents a > svg { flex-shrink: 0; color: var(--text-secondary); }
 .plugin-builder-recents a > svg:last-child { margin-left: auto; }
-@container workspace-header (max-width: 640px) {
-  .plugin-builder-status { display: none; }
+@container workspace-header (min-width: 521px) {
+  .plugin-builder-preview[data-active-tab="overview"] .workspace-tabs { --workspace-active-tab-width: 88px; }
 }
 @media (max-width: 1000px) {
   .plugin-builder-preview-content { padding: 24px; }

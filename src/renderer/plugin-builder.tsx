@@ -50,11 +50,6 @@ const TABS: WorkspaceTabOption<BuilderView>[] = [
   { id: "overview", label: "Overview", icon: Package }, { id: "files", label: "Files", icon: FileCode2 },
   { id: "configuration", label: "Setup", icon: Settings }, { id: "checks", label: "Checks", icon: Check },
 ];
-const STARTERS = [
-  { icon: WandSparkles, title: "Create a workflow", description: "Turn a repeatable task into a Skill.", prompt: "Create a Skill that reviews a game design document and produces a prioritized list of improvements. Include clear inputs, steps, output format, and an example request." },
-  { icon: Plug, title: "Connect a service", description: "Add tools from an existing MCP server.", prompt: "Help me connect an existing MCP service as a plugin. Ask me for its official documentation or connection details, then prepare a draft with the configuration fields it needs." },
-  { icon: Package, title: "Combine skills and tools", description: "Guide a workflow with connected tools.", prompt: "Help me create a plugin that combines a Skill with an existing MCP service. Start by helping me define the workflow and the tools it needs." },
-];
 
 export function PluginBuilder({ sessionId }: { sessionId: string }) {
   const generation = useReadyRuntimeGeneration();
@@ -149,7 +144,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   const goToPlugins = () => { window.location.hash = settingsHash("plugins"); };
   return <WorkspaceShell className="plugin-builder-shell" chatLayout={chatLayout} agentCollapsed={agentCollapsed}
     onHome={goToPlugins} homeLabel="Back to plugins" homeIcon={ArrowLeft} onExpandAgent={() => setAgentCollapsed(false)}
-    agent={<WorkspaceAgentPane label="Plugin assistant" title={<span className="viewer-title" title={state?.title}>{state?.title ?? "Plugin Builder"}</span>}
+    agent={<WorkspaceAgentPane label="Plugin assistant"
       actions={<>
         <button className="icon-button pane-header-action" type="button" disabled={disabled} title="New plugin" aria-label="New plugin"
           onClick={() => void action("creating", () => openPluginBuilder())}>
@@ -163,20 +158,12 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
       }}>
         <div className="timeline" aria-live="polite">
           {!state && !error ? <p className="plugin-builder-working" role="status"><LoaderCircle className="spin" size={13} />Opening your workspace…</p> : null}
-          {state && !state.turns.length ? <div className="plugin-builder-intro">
-            <h1>{state.pluginId ? "Improve your plugin" : "What should your plugin do?"}</h1>
-            <p>{state.pluginId ? "Describe what you want to configure or repair." : "Describe a workflow or connect an existing service. Review the draft in the workspace as you build."}</p>
-            {!state.pluginId ? <div className="plugin-builder-starters">{STARTERS.map(({ icon: Icon, ...starter }) => <button type="button" key={starter.title} title={starter.description} disabled={disabled} onClick={() => prefill(starter.prompt)}>
-              <Icon size={14} /><span>{starter.title}</span><ChevronRight size={12} />
-            </button>)}</div> : null}
-          </div> : null}
           {state ? <AgentTimeline turns={state.turns} onAddToChat={prefill} onOpenWorkspaceFile={file => { setView("files"); setFileRequest(file); }} /> : null}
           {state?.busy && !state.turns.some(turn => turn.items.some(item => item.type === "agentMessage" && item.status === "inProgress")) ? <p className="plugin-builder-working" role="status"><LoaderCircle className="spin" size={13} />{activityLabel(state.activity)}</p> : null}
           {state?.status === "interrupted" ? <p className="plugin-builder-notice" role="status">This run was interrupted. Your conversation and files are saved; send a message to continue.</p> : null}
         </div>
         <div className="composer">
           {error || state?.error ? <p className="plugin-builder-error" role="alert">{error ?? state?.error}{!state ? <button type="button" onClick={() => setRetry(value => value + 1)}>Retry</button> : null}</p> : null}
-          {catalog.status === "ready" && !catalog.models.length ? <p className="plugin-builder-notice">Connect a language model to start building. <a href={settingsHash("providers")}>Configure a provider</a></p> : null}
           <PromptBox value={input.prompt} onChange={prompt => setInput(current => ({ ...current, prompt }))} onSubmit={() => void send()}
             textareaRef={textarea} variant="project" disabled={!state} placeholder="Describe what your plugin should do…"
             actions={<ComposerActions models={catalog.models} status={catalog.status} value={model} reasoningLevel={reasoning} disabled={disabled}
@@ -198,9 +185,6 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
               {agentCollapsed ? <button className="icon-button pane-header-action" type="button" title="Show agent" aria-label="Show agent" onClick={() => setAgentCollapsed(false)}><PanelToggle size={14} /></button> : null}
             </> : null}
             <WorkspaceTabs tabs={TABS} active={view} onChange={setView} label="Plugin views" />
-          </div>
-          <div className="viewer-controls-slot plugin-builder-status" title={state ? `${state.title} · ${statusLabel(state.status)}` : "Loading workspace…"}>
-            <span>{state?.title ?? "Plugin Builder"}</span><small role="status">{state ? statusLabel(state.status) : "Loading…"}</small>
           </div>
           <div className="viewer-publish">
             <button className="icon-button pane-header-action" aria-label="Refresh plugin preview" title="Refresh plugin preview" type="button" disabled={disabled} onClick={() => void action("refreshing", refresh)}><RefreshCw size={14} /></button>
