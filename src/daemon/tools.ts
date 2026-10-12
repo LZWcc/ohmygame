@@ -30,6 +30,7 @@ import {
   type ToolRunFile,
 } from "../shared/contracts.js";
 import { ImageGenerationError, type ImageGenerator } from "./openai-image.js";
+import { sniffImageType } from "./image-format.js";
 import { Model3DGenerationError, type Generated3DModel, type Model3DAnimationAction, type Model3DGenerator } from "./model3d.js";
 import { model3DJournal } from "./model3d-journal.js";
 import { inspectModel3D } from "./model3d-inspect.js";
@@ -268,10 +269,11 @@ export class ToolRunner {
         ...(usesConfiguredOptions ? { resolution: resolution!, aspectRatio: aspectRatio!, ...(imageInput?.length ? { images: imageInput } : {}) } : { size }),
       }, signal)));
       signal?.throwIfAborted();
-      const files: ToolRunFile[] = generated.map((image, index) => ({
-        name: imageFileName(image.mediaType, outputs > 1 ? index + 1 : undefined),
-        mediaType: image.mediaType,
-      }));
+      const files: ToolRunFile[] = generated.map((image, index) => {
+        // Providers and proxies can ignore the requested output format.
+        const mediaType = sniffImageType(image.bytes) ?? image.mediaType;
+        return { name: imageFileName(mediaType, outputs > 1 ? index + 1 : undefined), mediaType };
+      });
       if (this.assetLibrary) {
         for (const [index, file] of files.entries()) {
           file.assetId = (await this.assetLibrary!.add(file.name, generated[index]!.bytes, {
