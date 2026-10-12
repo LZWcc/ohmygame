@@ -26,6 +26,21 @@ function mp4(width: number, height: number, rotated = false): Buffer {
   return Buffer.concat([box("ftyp", Buffer.from("isom")), box("mdat", Buffer.alloc(32)), box("moov", box("mvhd", Buffer.alloc(100)), audio, box("trak", box("tkhd", tkhd)))]);
 }
 
+function exifTiff(orientation: number, little: boolean, ifd: number): Buffer {
+  const tiff = Buffer.alloc(ifd + 18);
+  const u16 = (value: number, at: number) => little ? tiff.writeUInt16LE(value, at) : tiff.writeUInt16BE(value, at);
+  const u32 = (value: number, at: number) => little ? tiff.writeUInt32LE(value, at) : tiff.writeUInt32BE(value, at);
+  tiff.write(little ? "II" : "MM", 0, "ascii"); u16(42, 2); u32(ifd, 4);
+  u16(1, ifd); u16(0x0112, ifd + 2); u16(3, ifd + 4); u32(1, ifd + 6); u16(orientation, ifd + 10);
+  return tiff;
+}
+
+function jpegWithExif(jpeg: Buffer, tiff: Buffer): Buffer {
+  const exif = Buffer.concat([Buffer.from("Exif\0\0", "latin1"), tiff]), header = Buffer.alloc(4);
+  header.writeUInt16BE(0xffe1, 0); header.writeUInt16BE(exif.length + 2, 2);
+  return Buffer.concat([jpeg.subarray(0, 2), header, exif, jpeg.subarray(2)]);
+}
+
 describe("readMediaDimensions", () => {
   it("reads image and video headers without decoding", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-dimensions-"));
@@ -52,6 +67,32 @@ describe("readMediaDimensions", () => {
     await writeFile(path.join(directory, "broken.png"), "not an image");
     expect(await readMediaDimensions(path.join(directory, "broken.png"))).toBeUndefined();
     expect(await readMediaDimensions(path.join(directory, "missing.png"))).toBeUndefined();
+  });
+
+  it.each([1, 2, 3, 4, 5, 6, 7, 8])("uses the displayed PNG dimensions for EXIF orientation %i", async (orientation) => {
+    const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-png-orientation-"));
+    const file = path.join(directory, "rotated.png");
+    await writeFile(file, await sharp({ create: { width: 300, height: 200, channels: 3, background: "#8a6" } }).png().withMetadata({ orientation }).toBuffer());
+    expect(await readMediaDimensions(file)).toEqual(orientation >= 5 ? { width: 200, height: 300 } : { width: 300, height: 200 });
+  });
+
+  it.each([true, false])("follows JPEG EXIF offsets beyond 4KB (little endian: %s)", async (little) => {
+    const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-jpeg-orientation-"));
+    const file = path.join(directory, "large-exif.jpg");
+    const jpeg = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#8a6" } }).jpeg().toBuffer();
+    await writeFile(file, jpegWithExif(jpeg, exifTiff(6, little, 5000)));
+    expect(await readMediaDimensions(file)).toEqual({ width: 200, height: 300 });
+  });
+
+  it("ignores invalid TIFF metadata without reading outside the EXIF segment", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-invalid-exif-"));
+    const jpeg = await sharp({ create: { width: 300, height: 200, channels: 3, background: "#8a6" } }).jpeg().toBuffer();
+    const cases = [exifTiff(6, true, 5000).subarray(0, 8), exifTiff(6, true, 8).subarray(0, 20), exifTiff(9, true, 8)];
+    for (const [index, tiff] of cases.entries()) {
+      const file = path.join(directory, `${index}.jpg`);
+      await writeFile(file, jpegWithExif(jpeg, tiff));
+      expect(await readMediaDimensions(file)).toEqual({ width: 300, height: 200 });
+    }
   });
 
   it("records dimensions for new Library assets and backfills older records", async () => {
