@@ -325,11 +325,6 @@ export function CodingWorkspace({
               viewport={viewport}
               agentPlaytestWatch={agentPlaytestWatch}
               agentPlaytestWatchPending={agentPlaytestWatchPending}
-              project={project}
-              onStop={onStop ? () => { void player.close().catch(() => {}).then(onStop); } : undefined}
-              onRestart={() => onRestart()}
-              onReinstall={() => onRestart(undefined, true)}
-              onLogs={() => setLogsOpen((value) => !value)}
               onOpenSettings={() => setProjectSettingsOpen(true)}
               onNavigate={navigatePreview}
               onRefresh={refreshPreview}
@@ -410,7 +405,6 @@ export function CodingWorkspace({
             onRetry={() => onRestart()} onSettings={() => setProjectSettingsOpen(true)}
           />
           </ErrorBoundary>
-          {logsOpen ? <PreviewLogs project={project} onClose={() => setLogsOpen(false)} /> : null}
         </div>
       ) : null}
       {shownTab === "code" ? (
@@ -447,8 +441,19 @@ export function CodingWorkspace({
           }}
         />
       ) : null}
+      {supportsPreview && logsOpen ? <PreviewLogs project={project} onClose={() => setLogsOpen(false)} /> : null}
       {project && publishDialog ? <PublishDialog project={project} publishing={publishing} justPublished={publishDialog === "success"} onClose={onClosePublish} onPublish={onPublish} /> : null}
-      {project && projectSettingsOpen ? <ProjectSettingsDialog project={project} previewUrl={currentPreviewUrl} onClose={() => setProjectSettingsOpen(false)} onSaved={(updated) => onProjectUpdated?.(updated)} /> : null}
+      {project && projectSettingsOpen ? <ProjectSettingsDialog
+        project={project}
+        previewUrl={currentPreviewUrl}
+        previewActions={supportsPreview ? {
+          onRestart: (reinstall) => onRestart(undefined, reinstall),
+          onStop: onStop ? () => { void player.close().catch(() => {}).then(onStop); } : undefined,
+          onLogs: () => { setProjectSettingsOpen(false); setLogsOpen(true); },
+        } : undefined}
+        onClose={() => setProjectSettingsOpen(false)}
+        onSaved={(updated) => onProjectUpdated?.(updated)}
+      /> : null}
     </section>
   );
 }
@@ -462,15 +467,12 @@ function PreviewControls({
   viewport,
   agentPlaytestWatch,
   agentPlaytestWatchPending,
-  project, onStop, onRestart, onReinstall, onLogs,
   onOpenSettings,
   onNavigate,
   onRefresh,
   onToggleAgentPlaytestWatch,
   onViewportChange,
 }: {
-  project?: ProjectState;
-  onStop?: () => void; onRestart: () => void; onReinstall: () => void; onLogs: () => void;
   path: string;
   paths: string[];
   previewUrl?: string;
@@ -487,16 +489,6 @@ function PreviewControls({
 }) {
   return (
     <div className="preview-controls">
-      <details className="preview-run-menu">
-        <summary aria-label="Preview actions" data-status={project?.preview.diagnostic ? "error" : project?.preview.status}><span>{project?.preview.status === "starting" ? "Starting…" : project?.preview.status === "ready" ? "Running" : project?.preview.status === "error" ? "Failed" : project?.preview.status === "waiting" ? "Waiting" : "Stopped"}{project?.preview.diagnostic ? " · Error" : ""}</span></summary>
-        <div className="preview-run-actions" onClick={(event) => { if ((event.target as Element).closest("button")) event.currentTarget.parentElement?.removeAttribute("open"); }}>
-          <button type="button" disabled={!project || project.preview.status === "starting" || project.preview.status === "waiting"} onClick={onRestart}>{project?.preview.status === "ready" ? "Restart preview service" : "Start preview"}</button>
-          {onStop ? <button type="button" disabled={!project || !["ready", "starting"].includes(project.preview.status)} onClick={onStop}>{project?.preview.status === "starting" ? "Cancel startup" : "Stop preview"}</button> : null}
-          <button type="button" onClick={onLogs}>Preview logs</button>
-          {(project?.previewMode ?? "auto") !== "static" && project?.previewMode !== "command" && project?.preview.command !== "Serve static files" ? <button type="button" disabled={project?.preview.status === "starting" || project?.preview.status === "waiting"} onClick={onReinstall}>Reinstall dependencies and restart</button> : null}
-          {previewUrl ? <button type="button" onClick={() => window.open(isolatedPreviewUrl(previewUrl, "external"), "_blank", "noopener,noreferrer")}>Open in browser</button> : null}
-        </div>
-      </details>
       <ViewportMenu value={viewport} onChange={onViewportChange} />
       <PreviewLocation
         disabled={!previewUrl}

@@ -4260,6 +4260,14 @@ button.home-nav-item-active:hover {
   font: inherit;
   font-size: 11px;
 }
+.project-settings-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 2px 0 12px;
+  border: 0;
+}
 .project-settings-browser:hover:not(:disabled) {
   background: var(--surface-hover);
   color: var(--text);

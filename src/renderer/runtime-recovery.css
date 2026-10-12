@@ -107,67 +107,12 @@
   padding: 12px 16px;
   background: var(--surface, #252525);
   color: var(--text, #eee);
-  border: 1px solid #c86767;
+  border: 1px solid var(--danger);
   border-radius: 8px;
   font-size: 12px;
   box-shadow: 0 4px 20px #0003;
 }
 
-.preview-run-menu {
-  position: relative;
-  flex: 0 0 auto;
-  font-size: 11px;
-  white-space: nowrap;
-}
-.preview-run-menu summary {
-  cursor: pointer;
-  padding: 5px 8px;
-  list-style: none;
-  border-radius: 6px;
-  background: var(--surface-secondary, #202020);
-}
-.preview-run-menu summary::before {
-  display: none;
-  content: "●";
-  color: var(--text-muted);
-}
-.preview-run-menu summary[data-status="ready"]::before {
-  color: var(--success, #70bb87);
-}
-.preview-run-menu summary[data-status="starting"]::before {
-  color: var(--theme-accent);
-}
-.preview-run-menu summary[data-status="error"]::before {
-  color: #c86767;
-}
-.preview-run-actions {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 50;
-  display: grid;
-  min-width: 220px;
-  gap: 3px;
-  padding: 6px;
-  border: 1px solid var(--border, #444);
-  border-radius: 8px;
-  background: var(--surface, #181818);
-  box-shadow: 0 8px 24px #0004;
-}
-.preview-run-actions button {
-  padding: 8px;
-  text-align: left;
-  color: inherit;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-.preview-run-actions button:hover:not(:disabled) {
-  background: var(--surface-secondary, #303030);
-}
-.preview-run-actions button:disabled {
-  opacity: 0.45;
-}
 .preview-logs {
   position: absolute;
   bottom: 0;
@@ -177,9 +122,9 @@
   max-height: 45%;
   overflow: auto;
   padding: 12px;
-  background: var(--surface, #181818);
-  color: var(--text-primary, #ddd);
-  border-top: 1px solid var(--border, #444);
+  background: var(--surface);
+  color: var(--text);
+  border-top: 1px solid var(--border);
   font-size: 11px;
 }
 .preview-logs header {
@@ -211,22 +156,10 @@
   overflow-wrap: anywhere;
 }
 
-.coding-workspace-preview-panel {
+.coding-workspace {
   position: relative;
 }
 
-@container workspace-header (max-width: 520px) {
-  .preview-run-menu summary::before {
-    display: block;
-  }
-  .preview-run-menu summary > span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-  }
-}
 @container workspace-header (max-width: 380px) {
   .preview-controls > .viewport-menu {
     display: none;

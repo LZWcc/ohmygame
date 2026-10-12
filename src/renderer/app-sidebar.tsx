@@ -126,11 +126,11 @@ export function AppSidebar({ active, onNavigate }: AppSidebarProps) {
         <NavigationItem active={active === "library"} icon="library" label="Library" onClick={() => onNavigate("library")} />
         <NavigationItem active={active === "community"} icon="community" label="Community" onClick={() => onNavigate("community")} />
         <div className="home-nav-label home-nav-label-spaced">STUDIOS</div>
-        <NavigationItem active={active === "general"} icon="general" label="General Game" onClick={() => onNavigate("general")} />
         <NavigationItem active={active === "web-game"} icon="web-game" label="Web Game" onClick={() => onNavigate("web-game")} />
         <NavigationItem active={active === "interactive-story"} icon="interactive-story" label="Interactive Story" onClick={() => onNavigate("interactive-story")} />
         <NavigationItem active={active === "godot"} icon="godot" label="Godot" onClick={() => onNavigate("godot")} />
         <NavigationItem active={active === "asset-canvas"} icon="asset-canvas" label="Asset Canvas" onClick={() => onNavigate("asset-canvas")} />
+        <NavigationItem active={active === "general"} icon="general" label="General Game" onClick={() => onNavigate("general")} />
       </nav>
       {auth.state.status === "signed-in" ? (
         <div className="home-sidebar-account" ref={account}>
