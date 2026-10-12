@@ -9,6 +9,7 @@ import { AssetCanvasHome } from "./asset-canvas-home.js";
 import { invalidateQuickStartModels, loadQuickStartModels } from "./asset-canvas-quick-start.js";
 import { GameStudioHome } from "./game-studio-home.js";
 import { SettingsPage } from "./settings-page.js";
+import { PluginBuilder } from "./plugin-builder.js";
 import type { PluginMention, ProjectState, PromptAttachment, PromptImage, PromptMode } from "../shared/contracts.js";
 import type { PluginDetail } from "../shared/plugins.js";
 import { pluginMentionToken } from "../shared/plugins.js";
@@ -50,6 +51,7 @@ export function App() {
     };
   }, []);
 
+  if (route.page === "plugin-builder") return <PluginBuilder key={route.sessionId} sessionId={route.sessionId} />;
   if (route.page === "settings") {
     return <SettingsPage section={route.section} pluginId={route.pluginId} onBack={leaveSettings} onSectionChange={navigateToSettingsSection} onPluginChange={navigateToPlugin} onTryPlugin={tryPlugin} />;
   }

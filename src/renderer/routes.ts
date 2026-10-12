@@ -27,6 +27,7 @@ export type AppRoute =
   | { page: "projects"; projectType?: ProjectType }
   | { page: "community" }
   | { page: "settings"; section: SettingsSection; pluginId?: string }
+  | { page: "plugin-builder"; sessionId: string }
   | { page: "game"; gameId: string }
   | { page: "playtest"; projectId: string }
   | { page: "thumbnail"; projectId: string; nodeId: string }
@@ -34,6 +35,8 @@ export type AppRoute =
 
 export function parseAppRoute(hash: string): AppRoute {
   if (hash === "#/" || hash === "") return { page: "home" };
+  const builderMatch = /^#\/plugins\/builder\/([0-9a-f-]{36})$/.exec(hash);
+  if (builderMatch?.[1]) return { page: "plugin-builder", sessionId: builderMatch[1] };
   const pluginMatch = /^#\/(?:settings\/)?plugins(?:\/([^/]+))?$/.exec(hash);
   if (pluginMatch) {
     try {
@@ -117,6 +120,10 @@ export function projectsHash(projectType?: ProjectType): string {
 
 export function pluginHash(pluginId: string): string {
   return `#/settings/plugins/${encodeURIComponent(pluginId)}`;
+}
+
+export function pluginBuilderHash(sessionId: string): string {
+  return `#/plugins/builder/${encodeURIComponent(sessionId)}`;
 }
 
 export function projectHash(projectId: string, view?: "design"): string {

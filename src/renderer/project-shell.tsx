@@ -1,6 +1,5 @@
 import {
   ArrowLeft,
-  House,
   LoaderCircle,
   MessageSquarePlus,
   PanelToggle,
@@ -16,8 +15,6 @@ import {
   useState,
   lazy,
   Suspense,
-  type CSSProperties,
-  type KeyboardEvent,
 } from "react";
 import type { AgentModel, AgentModelRef, AgentReasoningLevel, ConversationCapabilities, ConversationSummary, PendingPrompt, PluginMention, ProjectState, PromptAttachment, PromptContext, PromptImage, PromptMode, PromptReference, ThreadItem } from "../shared/contracts.js";
 import { findAgentModel, preferredAgentModel } from "../shared/agent-models.js";
@@ -70,6 +67,7 @@ import type { PublishDetails } from "./publish-dialog.js";
 import { usePlaytestAskRequests } from "./playable-playtest.js";
 import { useRuntimeConnection } from "./runtime-connection.js";
 import { ErrorBoundary } from "./error-boundary.js";
+import { WorkspaceShell, WorkspaceAgentPane } from "./workspace-shell.js";
 
 interface ProjectShellProps {
   projectId: string;
@@ -86,10 +84,7 @@ interface ProjectShellProps {
   onHome: () => void;
 }
 
-const DEFAULT_AGENT_WIDTH = 430;
 const CanvasWorkspace = lazy(() => import("./canvas-workspace.js").then((module) => ({ default: module.CanvasWorkspace })));
-const MIN_AGENT_WIDTH = 320;
-const AGENT_WIDTH_STORAGE_KEY = "ohmygame-agent-width";
 const GODOT_WORKSPACE_OPEN_STORAGE_KEY = "ohmygame-godot-workspace-open";
 const EMPTY_CAPABILITIES: ConversationCapabilities = { plugins: [], skills: [] };
 
@@ -123,10 +118,7 @@ export function ProjectShell({
     onViewChange?.(open ? "design" : "workspace", options);
   }, [onViewChange]);
   const [godotWorkspaceOpen, setGodotWorkspaceOpen] = useState(readGodotWorkspaceOpen);
-  const [agentWidth, setAgentWidth] = useState(readAgentWidth);
   const [chatLayout] = useState<ChatLayout>(readChatLayout);
-  const [maximumAgentWidth, setMaximumAgentWidth] = useState(DEFAULT_AGENT_WIDTH);
-  const [resizingAgent, setResizingAgent] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishDialog, setPublishDialog] = useState<{ projectId: string; status: "open" | "success" }>();
   const [workspaceRevision, setWorkspaceRevision] = useState(0);
@@ -148,9 +140,6 @@ export function ProjectShell({
   const unsubscribeEvents = useRef<(() => void) | undefined>(undefined);
   const timeline = useRef<HTMLDivElement>(null);
   const followTimeline = useRef(true);
-  const workspaceShell = useRef<HTMLElement>(null);
-  const agentWidthRef = useRef(agentWidth);
-  const resizingAgentRef = useRef(false);
 
   // Godot has no Preview, so its workspace opens on Design unless the user hid it,
   // since Design keeps the workspace shown.
@@ -177,52 +166,6 @@ export function ProjectShell({
     });
     return () => { disposed = true; };
   }, [projectId, state.conversation?.id, state.connection]);
-
-  function resizeAgent(clientX: number): void {
-    const shell = workspaceShell.current;
-    const bounds = shell?.getBoundingClientRect();
-    if (!shell || !bounds) return;
-    const maximum = getMaximumAgentWidth(bounds.width);
-    const distance = chatLayout === "right" ? bounds.right - clientX : clientX - bounds.left;
-    const width = Math.round(Math.min(maximum, Math.max(MIN_AGENT_WIDTH, distance)));
-    agentWidthRef.current = width;
-    shell.style.setProperty("--agent-width", `${width}px`);
-  }
-
-  function saveAgentWidth(): void {
-    localStorage.setItem(AGENT_WIDTH_STORAGE_KEY, String(agentWidthRef.current));
-  }
-
-  function finishAgentResize(): void {
-    if (!resizingAgentRef.current) return;
-    resizingAgentRef.current = false;
-    setResizingAgent(false);
-    setAgentWidth(agentWidthRef.current);
-    saveAgentWidth();
-  }
-
-  function resetAgentWidth(): void {
-    const width = Math.min(DEFAULT_AGENT_WIDTH, maximumAgentWidth);
-    agentWidthRef.current = width;
-    setAgentWidth(width);
-    localStorage.setItem(AGENT_WIDTH_STORAGE_KEY, String(width));
-  }
-
-  function resizeAgentWithKeyboard(event: KeyboardEvent<HTMLDivElement>): void {
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-    event.preventDefault();
-    const direction = chatLayout === "left"
-      ? (event.key === "ArrowLeft" ? -1 : 1)
-      : (event.key === "ArrowLeft" ? 1 : -1);
-    const bounds = workspaceShell.current?.getBoundingClientRect();
-    if (!bounds) return;
-    const clientX = chatLayout === "right"
-      ? bounds.right - agentWidthRef.current - direction * 16
-      : bounds.left + agentWidthRef.current + direction * 16;
-    resizeAgent(clientX);
-    setAgentWidth(agentWidthRef.current);
-    saveAgentWidth();
-  }
 
   function subscribe(cursor: number, selectedConversationId: string): void {
     unsubscribeEvents.current?.();
@@ -390,24 +333,6 @@ export function ProjectShell({
     observer.observe(element);
     return () => observer.disconnect();
   }, [state.conversation?.id, state.agent.status, state.plan.mode]);
-
-  useEffect(() => {
-    const updateMaximum = () => {
-      if (window.matchMedia("(max-width: 720px)").matches) return;
-      const bounds = workspaceShell.current?.getBoundingClientRect();
-      if (!bounds) return;
-      const maximum = getMaximumAgentWidth(bounds.width);
-      setMaximumAgentWidth(maximum);
-      if (agentWidthRef.current > maximum) {
-        agentWidthRef.current = maximum;
-        setAgentWidth(maximum);
-        localStorage.setItem(AGENT_WIDTH_STORAGE_KEY, String(maximum));
-      }
-    };
-    updateMaximum();
-    window.addEventListener("resize", updateMaximum);
-    return () => window.removeEventListener("resize", updateMaximum);
-  }, []);
 
   useEffect(() => {
     const project = state.project;
@@ -731,27 +656,12 @@ export function ProjectShell({
   const viewerCollapsed = isGodotProject && !godotWorkspaceOpen && !designOpen;
 
   return (
-    <main
-      className={`workspace-shell workspace-shell-chat-${chatLayout}${agentIsCollapsed ? " workspace-shell-agent-collapsed" : ""}${viewerCollapsed ? " workspace-shell-viewer-collapsed" : ""}${resizingAgent ? " workspace-shell-resizing" : ""}`}
-      ref={workspaceShell}
-      style={{ "--agent-width": `${agentWidth}px` } as CSSProperties}
-    >
-      {resizingAgent ? (
-        <div className="workspace-resize-shield" />
-      ) : null}
-
-      {chatLayout === "left" ? (
-        <WorkspaceNavigationActions
-          collapsed={agentIsCollapsed}
-          onHome={requestHome}
-          onExpand={() => setAgentCollapsed(false)}
-        />
-      ) : null}
-
-      <section className="agent-pane" aria-label="Agent">
-        <header className="pane-header window-drag-handle">
-          <span className="workspace-navigation-drag-exclusion" aria-hidden="true" />
-          <div className="pane-header-actions">
+    <WorkspaceShell chatLayout={chatLayout} agentCollapsed={agentIsCollapsed} viewerCollapsed={viewerCollapsed}
+      onHome={requestHome} onExpandAgent={() => setAgentCollapsed(false)}
+      agent={<WorkspaceAgentPane bodyRef={timeline} onScroll={(event) => {
+        const element = event.currentTarget;
+        followTimeline.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+      }} actions={<>
             <button
               className="icon-button pane-header-action"
               type="button"
@@ -791,17 +701,7 @@ export function ProjectShell({
                 <PanelToggle size={14} />
               </button>
             ) : null}
-          </div>
-        </header>
-
-        <div
-          className="agent-body"
-          ref={timeline}
-          onScroll={(event) => {
-            const element = event.currentTarget;
-            followTimeline.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-          }}
-        >
+      </>}>
           <div className="timeline" aria-live="polite">
             {state.phase === "loading" ? <TimelineSkeleton /> : null}
             <Activity mode={agentIsCollapsed ? "hidden" : "visible"}>
@@ -891,39 +791,8 @@ export function ProjectShell({
             onSteerPending={steerFollowUp}
             onEditPending={editFollowUp}
           /> : null}
-        </div>
-      </section>
-
-      <div
-        className="workspace-resizer"
-        role="separator"
-        aria-label="Resize agent panel"
-        aria-orientation="vertical"
-        aria-valuemin={MIN_AGENT_WIDTH}
-        aria-valuemax={maximumAgentWidth}
-        aria-valuenow={agentWidth}
-        aria-hidden={agentIsCollapsed || viewerCollapsed || undefined}
-        tabIndex={agentIsCollapsed || viewerCollapsed ? -1 : 0}
-        onDoubleClick={resetAgentWidth}
-        onKeyDown={resizeAgentWithKeyboard}
-        onPointerDown={(event) => {
-          if (!event.isPrimary || event.button !== 0) return;
-          event.preventDefault();
-          event.currentTarget.setPointerCapture(event.pointerId);
-          resizingAgentRef.current = true;
-          setResizingAgent(true);
-        }}
-        onPointerMove={(event) => {
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeAgent(event.clientX);
-        }}
-        onPointerUp={(event) => {
-          event.currentTarget.releasePointerCapture(event.pointerId);
-          finishAgentResize();
-        }}
-        onPointerCancel={finishAgentResize}
-        onLostPointerCapture={finishAgentResize}
-      />
-
+      </WorkspaceAgentPane>}
+    >
       <ErrorBoundary label="Workspace" resetKey={project?.id} onHome={onHome}>
       {!project ? <section className="viewer-pane" /> : project.type !== "interactive-story" && project.type !== "asset-canvas" ? (
         <CodingWorkspace
@@ -990,26 +859,7 @@ export function ProjectShell({
         onSendToAgent={sendEditorRequest}
       />}
       </ErrorBoundary>
-    </main>
-  );
-}
-
-function WorkspaceNavigationActions({ collapsed, onHome, onExpand }: {
-  collapsed: boolean;
-  onHome: () => void;
-  onExpand: () => void;
-}) {
-  return (
-    <div className="workspace-navigation-actions" role="toolbar" aria-label="Workspace navigation">
-      <button className="icon-button workspace-home-button" type="button" onClick={onHome} title="Home" aria-label="Home">
-        <House size={14} />
-      </button>
-      {collapsed ? (
-        <button className="icon-button" type="button" onClick={onExpand} title="Show agent" aria-label="Show agent">
-          <PanelToggle size={15} />
-        </button>
-      ) : null}
-    </div>
+    </WorkspaceShell>
   );
 }
 
@@ -1050,16 +900,7 @@ async function initialConversationModel(): Promise<AgentModelRef | undefined> {
   }
 }
 
-function readAgentWidth(): number {
-  const stored = Number(localStorage.getItem(AGENT_WIDTH_STORAGE_KEY));
-  return Number.isFinite(stored) && stored >= MIN_AGENT_WIDTH ? stored : DEFAULT_AGENT_WIDTH;
-}
-
 function readGodotWorkspaceOpen(): boolean {
   // Open unless the user hid it; storage may be unavailable.
   try { return localStorage.getItem(GODOT_WORKSPACE_OPEN_STORAGE_KEY) !== "false"; } catch { return true; }
-}
-
-function getMaximumAgentWidth(workspaceWidth: number): number {
-  return Math.round(Math.max(MIN_AGENT_WIDTH, Math.min(workspaceWidth * 0.65, workspaceWidth - MIN_AGENT_WIDTH - 5)));
 }
