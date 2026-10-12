@@ -14,6 +14,7 @@ import { GAME_PROJECT_TYPES } from "./project-types.js";
 import { createdProjectView, projectsHash, type AppNavigationTarget } from "./routes.js";
 import { WindowDragRegion } from "./window-drag-region.js";
 import { useProjectShelfLayout } from "./use-project-shelf-layout.js";
+import { useProjectActivity } from "./use-project-activity.js";
 import "./studios.css";
 
 interface HomeProps {
@@ -26,6 +27,7 @@ export function Home({ onNavigate, onCreate, onOpen }: HomeProps) {
   const serviceGeneration = useReadyRuntimeGeneration();
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
+  const activity = useProjectActivity(phase === "ready" && projects.length > 0);
   const [loadError, setLoadError] = useState<string>();
   const [projectActionError, setProjectActionError] = useState<string>();
   const [projectType, setProjectType] = useState<ProjectType>("web-game");
@@ -123,6 +125,7 @@ export function Home({ onNavigate, onCreate, onOpen }: HomeProps) {
                 <ProjectCard
                   key={project.id}
                   project={project}
+                  agentStatus={activity.get(project.id)}
                   fallback={index % 4}
                   onOpen={() => onOpen(project.id)}
                   actions={{ onRename: () => {

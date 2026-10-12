@@ -25,6 +25,7 @@ import { ProjectRenameDialog } from "./project-rename-dialog.js";
 import { createdProjectView, projectsHash, type AppNavigationTarget } from "./routes.js";
 import { WindowDragRegion } from "./window-drag-region.js";
 import { MAX_RECENT_PROJECTS, useProjectShelfLayout } from "./use-project-shelf-layout.js";
+import { useProjectActivity } from "./use-project-activity.js";
 import {
   GAME_STUDIOS,
   recentStudioProjects,
@@ -57,6 +58,7 @@ export function GameStudioHome({
   const studio = GAME_STUDIOS[projectType];
   const [projects, setProjects] = useState<ProjectState[]>([]);
   const [phase, setPhase] = useState<"loading" | "ready" | "error">("loading");
+  const activity = useProjectActivity(phase === "ready" && projects.length > 0);
   const [error, setError] = useState<string>();
   const [actionError, setActionError] = useState<string>();
   const [createOpen, setCreateOpen] = useState(false);
@@ -169,6 +171,7 @@ export function GameStudioHome({
                 <ProjectCard
                   key={project.id}
                   project={project}
+                  agentStatus={activity.get(project.id)}
                   fallback={index % 4}
                   onOpen={() => onOpenProject(project.id)}
                   actions={{
