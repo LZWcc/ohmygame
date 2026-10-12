@@ -90,7 +90,7 @@ export class ProjectManager {
     this.#projectsDirectory = path.join(dataDirectory, "projects");
   }
 
-  async load(): Promise<void> {
+  async load(onError?: (projectDirectory: string, cause: unknown) => void): Promise<void> {
     await mkdir(this.#projectsDirectory, { recursive: true });
     const entries = await readdir(this.#projectsDirectory, { withFileTypes: true });
     const projects = await mapConcurrent(
@@ -98,22 +98,27 @@ export class ProjectManager {
       PROJECT_LOAD_CONCURRENCY,
       async (entry) => {
         const projectDirectory = path.join(this.#projectsDirectory, entry.name);
-        const { metadata, missing } = await readMetadata(projectDirectory, entry.name, (await lstat(projectDirectory)).mtime.toISOString());
-        const workspacePath = metadata.workspacePath ?? path.join(projectDirectory, "workspace");
-        const workspaceAvailable = await isDirectory(workspacePath);
-        const project = projectState(
-          workspacePath,
-          metadata,
-          await isRunnableStartupWorkspace({ ...metadata, workspacePath }),
-          projectDirectory,
-          workspaceAvailable,
-        );
-        if (missing) await writeMetadata(projectDirectory, metadata);
-        return project;
+        try {
+          const { metadata, missing } = await readMetadata(projectDirectory, entry.name, (await lstat(projectDirectory)).mtime.toISOString());
+          const workspacePath = metadata.workspacePath ?? path.join(projectDirectory, "workspace");
+          const workspaceAvailable = await isDirectory(workspacePath);
+          const project = projectState(
+            workspacePath,
+            metadata,
+            await isRunnableStartupWorkspace({ ...metadata, workspacePath }),
+            projectDirectory,
+            workspaceAvailable,
+          );
+          if (missing) await writeMetadata(projectDirectory, metadata);
+          return project;
+        } catch (cause) {
+          onError?.(projectDirectory, cause);
+          return undefined;
+        }
       },
     );
     for (const project of projects) {
-      this.#projects.set(project.id, project);
+      if (project) this.#projects.set(project.id, project);
     }
   }
 
