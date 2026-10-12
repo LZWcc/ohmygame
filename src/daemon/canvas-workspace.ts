@@ -1,6 +1,6 @@
 import { CANVAS_TABLE_SCHEMA, createCanvasTable, isCanvasTable, canvasTablePath, type CanvasTable, type CanvasTableDetail } from "../shared/canvas-table.js";
 import { createHash, randomUUID } from "node:crypto";
-import { applyCanvasNodeLayout, canvasNodeContent, canvasNodeLayout } from "../shared/canvas-node-layout.js";
+import { applyCanvasNodeLayout, canvasNodeContent, canvasNodeLayout, contentNodeSizeIssue, isResizableCanvasNodeType } from "../shared/canvas-node-layout.js";
 import { resolveVideoMentions } from "../shared/video-references.js";
 import { lstat, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -8,7 +8,7 @@ import { convertToPng } from "@earendil-works/pi-coding-agent";
 import type { AssetCanvasNode, PromptImage, RunToolRequest, ToolJob, ToolId } from "../shared/contracts.js";
 import { createCanvasBoard, fitCanvasLayout, isCanvasBoard, isCanvasIndex, CANVAS_INDEX_SCHEMA, CANVAS_BOARD_SCHEMA, CANVAS_LAYOUT_SCHEMA, type CanvasBoard, type CanvasBoardDetail, type CanvasWorkspaceDetail, type CanvasWorkspaceIndex } from "../shared/canvas-workspace.js";
 import { CANVAS_ASSETS_SCHEMA, canvasNodeAssetIds } from "../shared/canvas-assets.js";
-import { combineAssetCanvasPrompt, createAssetCanvasDocument, resolveAssetCanvasAssetId } from "../shared/asset-canvas.js";
+import { combineAssetCanvasPrompt, createAssetCanvasDocument, resolveAssetCanvasAssetId, validateAssetCanvasDocument } from "../shared/asset-canvas.js";
 import { buildModel3DToolRequest } from "../shared/generation-config.js";
 import { getWorkspaceMedia } from "./workspace.js";
 import { createCanvasDocument, canvasDocumentPath, type CanvasDocumentDetail, type CanvasMarkdownDocument } from "../shared/canvas-document.js";
@@ -38,7 +38,7 @@ Canvas files are the source of truth in both Design and Asset Canvas. Use normal
 - boards/<id>.json contains nodes and their content. Every node may have a title and a description of its purpose. Document bodies live in documents/<id>.md, referenced by documentId. Table data lives in tables/<id>.json, referenced by tableId; register tables in index.json. Keep row/column IDs stable and match cells to their column types.
 - Give nodes meaningful titles. Descriptions explain their intended role; do not describe unseen image pixels as verified facts.
 - For game work, identify reference mockups and production assets in node titles/descriptions. Record production assets' intended gameplay use in the design document; reference mockups do not fulfill those requirements.
-- editor/<board-id>.json stores positions, optional node width/height, and zoom. fitView requests a one-time fit when a remixed board is first opened; the editor clears it after saving the new viewport. New nodes are placed automatically; layout edits are only needed when the user asks to arrange the canvas.
+- editor/<board-id>.json stores positions, zoom, and width/height for text, document, and table nodes only; media and generation nodes size to their content. fitView requests a one-time fit when a remixed board is first opened; the editor clears it after saving the new viewport. New nodes are placed automatically; layout edits are only needed when the user asks to arrange the canvas.
 - assets.json maps asset IDs to names, workspace-relative paths, optional descriptions and generation prompts. Use the same ID for the same asset across boards. References with type "library" resolve through this manifest. libraryAssetId records provenance; local files remain usable without the Library.
 - Read actual image files with read when judging their appearance. A name, description, or generation prompt is not proof of what the image shows.
 - promptSource references a text or document node. Text and document nodes accept references to text, document, image, or image asset nodes as AI source material. images, references, and source declare dependencies; their canvas lines are derived. Do not duplicate these relationships in edges.
@@ -58,7 +58,7 @@ The canvas edits ordinary project files. Documents are Markdown and media files 
 | documents/<id>.md | Canonical document body |
 | tables/<id>.json | Typed columns and rows with stable IDs; cells keyed by column ID |
 | assets.json | Asset IDs, names, project-relative file paths, descriptions and generation prompts |
-| editor/<id>.json | Positions, optional node dimensions and canvas viewport; missing node positions are filled automatically |
+| editor/<id>.json | Positions, text/document/table node dimensions and canvas viewport; missing node positions are filled automatically |
 | schemas/ | Exact persisted file contracts |
 | jobs.json | Generation history managed by the application |
 
@@ -155,15 +155,29 @@ async function writeCanvasTable(workspace: string, table: CanvasTable): Promise<
   return { table, revision: revision(text) };
 }
 export async function readCanvasBoard(workspace: string, id: string): Promise<CanvasBoardDetail | undefined> {
+  return (await inspectCanvasBoard(workspace, id))?.detail;
+}
+/** Reads a board and lists tolerated problems that canvas_check reports but the editor ignores. */
+export async function inspectCanvasBoard(workspace: string, id: string): Promise<{ detail: CanvasBoardDetail; issues: string[] } | undefined> {
   const name = `boards/${validId(id)}.json`, text = await readCanvasFile(workspace, name);
   if (text === undefined) return undefined;
   const raw = parseCanvasJson<Omit<CanvasBoard, "editorLayout">>(text, name, CANVAS_BOARD_SCHEMA);
   const layoutName = `editor/${id}.json`, layoutText = await readCanvasFile(workspace, layoutName);
   const layout = layoutText === undefined ? createAssetCanvasDocument().editorLayout : parseCanvasJson<CanvasBoard["editorLayout"]>(layoutText, layoutName, CANVAS_LAYOUT_SCHEMA);
-  const editorLayout = fitCanvasLayout(raw.nodes, layout);
+  const editorLayout = fitCanvasLayout(raw.nodes, layout), issues: string[] = [];
+  for (const node of raw.nodes) {
+    const { width, height, ...position } = editorLayout.nodes[node.id]!;
+    if (isResizableCanvasNodeType(node.type) || (width === undefined && height === undefined)) continue;
+    // Older agent edits could size content-sized nodes; ignore the size so those boards still open.
+    editorLayout.nodes[node.id] = position;
+    issues.push(contentNodeSizeIssue(node));
+  }
   const board = { ...raw, editorLayout, nodes: raw.nodes.map((node) => applyCanvasNodeLayout(node, editorLayout.nodes[node.id]!)) };
-  if (!isCanvasBoard(board) || board.id !== id) throw new CanvasError(`canvas/${name}: invalid node IDs or references`);
-  return { board, revision: revision([text, layoutText ?? ""]) };
+  // The file schemas were checked above; validate cross-node rules once.
+  try { validateAssetCanvasDocument(board); }
+  catch (cause) { throw new CanvasError(`canvas/${name}: ${cause instanceof Error ? cause.message : String(cause)}`); }
+  if (board.id !== id) throw new CanvasError(`canvas/${name}: board ID does not match its file name`);
+  return { detail: { board, revision: revision([text, layoutText ?? ""]) }, issues };
 }
 async function writeCanvasBoard(workspace: string, board: CanvasBoard): Promise<CanvasBoardDetail> {
   if (!isCanvasBoard(board)) throw new CanvasError("Invalid canvas board");

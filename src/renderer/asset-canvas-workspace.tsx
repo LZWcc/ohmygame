@@ -48,8 +48,8 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import { CANVAS_GRID_SIZE, snapCanvasPosition } from "./canvas-alignment.js";
-import { canvasNodeLayout } from "../shared/canvas-node-layout.js";
-import { CANVAS_READABLE_SIZES, CanvasNodeResizer, CanvasNodeSizeActions, type CanvasNodeResizeRuntime } from "./canvas-node-resizer.js";
+import { RESIZABLE_CANVAS_NODE_SIZES, canvasNodeLayout, isResizableCanvasNodeType } from "../shared/canvas-node-layout.js";
+import { CanvasNodeResizer, CanvasNodeSizeActions, type CanvasNodeResizeRuntime } from "./canvas-node-resizer.js";
 import { MAX_ASSET_CANVAS_NODES, MAX_TEXT_NODE_REFERENCES } from "../shared/asset-canvas-schema.js";
 import { createCanvasClipboard, duplicateAssetCanvasNode, duplicateCanvasSelection, lastCanvasClipboard, parseCanvasClipboard, rememberCanvasClipboard, type CanvasClipboard } from "./asset-canvas-clipboard.js";
 import { clipboardFiles, hasTransferredFiles, pasteNativeFiles, transferredFiles, type TransferredFile } from "./file-transfer.js";
@@ -1321,7 +1321,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
 
   const tableContents = [...tables.storage.sessions.values()].map((session) => session.local);
   const renderedNodes = nodes.map((original) => {
-    const size = CANVAS_READABLE_SIZES[original.type as keyof typeof CANVAS_READABLE_SIZES];
+    const size = isResizableCanvasNodeType(original.type) ? RESIZABLE_CANVAS_NODE_SIZES[original.type] : undefined;
     const node = { ...original, ...(size ? { style: { ...original.style, width: original.width ?? size.width, height: original.height ?? size.height } } : {}), data: { ...original.data,
       ...(size ? { resizeRuntime: {
         start: beginHistoryGesture, end: finishHistoryGesture,

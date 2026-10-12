@@ -21,8 +21,8 @@ export const ASSET_CANVAS_EDITOR_LAYOUT_SCHEMA = {
         ...EDITOR_LAYOUT_SCHEMA.properties.nodes.additionalProperties,
         properties: {
           ...EDITOR_LAYOUT_SCHEMA.properties.nodes.additionalProperties.properties,
-          width: { type: "number", minimum: 100, maximum: 4096 },
-          height: { type: "number", minimum: 100, maximum: 4096 },
+          width: { type: "number", minimum: 100, maximum: 4096, description: "Text, document and table nodes only; other nodes size to their content." },
+          height: { type: "number", minimum: 100, maximum: 4096, description: "Text, document and table nodes only; other nodes size to their content." },
         },
       },
     },
