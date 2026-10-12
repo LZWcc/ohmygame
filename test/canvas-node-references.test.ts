@@ -5,6 +5,7 @@ import { MAX_TEXT_NODE_REFERENCES } from "../src/shared/asset-canvas-schema.js";
 import { connectionRelation, removeNodesAndReferences, toAssetCanvasNode } from "../src/renderer/asset-canvas-workspace.js";
 import { createCanvasClipboard, duplicateCanvasSelection, parseCanvasClipboard } from "../src/renderer/asset-canvas-clipboard.js";
 import { mergeCanvasDocument } from "../src/shared/canvas-workspace.js";
+import { imageModelsForProvider } from "../src/daemon/image-models.js";
 
 const position = { x: 0, y: 0 };
 const ref = (nodeId: string) => ({ type: "node" as const, nodeId });
@@ -77,4 +78,19 @@ describe("Text and Document node references", () => {
     expect(result.nodes[2]!.data).toMatchObject({ references: [ref("copy-1"), ref("copy-2")] });
     expect(isAssetCanvasDocument(canvas(result.nodes))).toBe(true);
   });
+});
+
+describe("Image node reference capacity", () => {
+  it.each([[15, 16, true], [16, 16, false], [1, 2, true], [2, 2, false], [0, 0, false], [16, 20, false]] as const)(
+    "validates %i existing references against a model limit of %i",
+    (count, limit, accepted) => {
+      const models = imageModelsForProvider("relay", "Relay", ["gpt-image-2"]);
+      models[0] = { ...models[0]!, maxReferenceImages: limit, supportsReferenceImage: limit > 0 };
+      const target = { ...image, data: { ...image.data, model: { provider: "relay", id: "gpt-image-2" },
+        images: Array.from({ length: count }, (_, index) => ({ type: "library" as const, assetId: `reference-${index}` })),
+      } };
+      const candidate = { ...image, id: "new-reference" };
+      expect(connectionRelation(candidate, target, "out", [], [], models)).toBe(accepted ? "image-reference" : undefined);
+    },
+  );
 });

@@ -46,6 +46,15 @@ describe("provider model discovery", () => {
     expect(request.mock.calls[0]?.[1]?.headers).toEqual({ accept: "application/json" });
   });
 
+  it.each([
+    ["gpt-image-1", 16], ["gpt-image-1.5", 16], ["gpt-image-2", 16],
+    ["gemini-3.1-flash-image", 14], ["gemini-3-pro-image-preview", 14], ["gemini-2.5-flash-image", 3],
+  ])("discovers %s with its multi-image limit without a capability catalog", async (id, maxReferenceImages) => {
+    const request = vi.fn<typeof fetch>(async () => Response.json({ data: [{ id }] }));
+    const result = await discoverProviderModels(connection, request);
+    expect(result.models[0]?.usages?.image?.maxReferenceImages).toBe(maxReferenceImages);
+  });
+
   it("merges dedicated media catalogs by ID and keeps every declared use and limit", async () => {
     const request = vi.fn<typeof fetch>(async (url) => {
       const path = new URL(String(url)).pathname;
@@ -63,7 +72,7 @@ describe("provider model discovery", () => {
     expect(result.models).toHaveLength(3);
     expect(result.models.find((model) => model.id === "shared-alias")).toMatchObject({ name: "Multimodal", usages: {
       language: true,
-      image: { protocol: "openrouter-images", resolutions: ["1K", "2K"], aspectRatios: ["1:1", "16:9"], maxReferenceImages: 14, maxOutputs: 4 },
+      image: { protocol: "openrouter-images", resolutions: ["1K", "2K"], aspectRatios: ["1:1", "16:9"], maxReferenceImages: 16, maxOutputs: 4 },
       video: { protocol: "openrouter-videos", resolutions: ["720p"], durations: [5, 10], maxReferenceImages: 2, referenceModes: ["frame"] },
     } });
     expect(result.models.find((model) => model.id === "video-alias")?.usages?.video).toMatchObject({ maxReferenceImages: 9, referenceModes: ["reference"] });

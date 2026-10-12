@@ -51,8 +51,13 @@ through an OpenAI-compatible relay use bearer authentication. Services with
 ## Generation settings
 
 Image settings include resolutions, aspect ratios, reference-image limits and
-output count. The application accepts up to 14 image references. Video settings
-include resolutions, ratios, durations (1–30 seconds), reference-image limits
+output count. The application accepts up to 16 image references. Known model IDs
+start with their model's reference count: GPT Image uses 16; Gemini 3 image models
+use 14; Gemini 2.5 Flash Image uses 3. Provider-reported limits take precedence.
+Unknown aliases start with one reference until you set the endpoint's supported
+count. Saved limits are preserved; **Use model default** in Image settings can
+restore a known model's reference count without resetting its other settings.
+Video settings include resolutions, ratios, durations (1–30 seconds), reference-image limits
 (up to 30), and first/last-frame or reference modes.
 
 For Meshy-compatible 3D models, choose a single-image or multi-image template and

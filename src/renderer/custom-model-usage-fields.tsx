@@ -1,24 +1,26 @@
 import { protocolOperations } from "../shared/model3d-operations.js";
 import { useState } from "react";
 import {
-  IMAGE_ASPECT_RATIOS, IMAGE_RESOLUTIONS, IMAGE_OUTPUT_COUNTS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS,
+  IMAGE_ASPECT_RATIOS, IMAGE_MAX_REFERENCE_IMAGES, IMAGE_RESOLUTIONS, IMAGE_OUTPUT_COUNTS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS,
   type CustomModel3DSettings, type CustomModelUsages, type CustomProviderPreset, type ImageProtocol, type VideoProtocol,
 } from "../shared/contracts.js";
 import { defaultImageSettings, defaultModel3DSettings, defaultVideoSettings, IMAGE_PROTOCOL_LABELS, MODEL_USAGE_LABELS, VIDEO_PROTOCOL_LABELS } from "../shared/custom-models.js";
+import { knownImageReferenceLimit } from "../shared/image-reference-limits.js";
 
-export function CustomModelUsageFields({ usages, preset, onChange }: {
-  usages: CustomModelUsages; preset?: CustomProviderPreset; onChange: (usages: CustomModelUsages) => void;
+export function CustomModelUsageFields({ usages, preset, modelId, onChange }: {
+  usages: CustomModelUsages; preset?: CustomProviderPreset; modelId: string; onChange: (usages: CustomModelUsages) => void;
 }) {
   function toggle(usage: keyof CustomModelUsages, enabled: boolean) {
     const next = { ...usages };
     if (!enabled) delete next[usage];
     else if (usage === "language") next.language = true;
-    else if (usage === "image") next.image = defaultImageSettings(preset === "google" ? "gemini-generate-content" : preset === "openrouter" ? "openrouter-images" : preset === "seedance" ? "volcengine-images" : "openai-images");
+    else if (usage === "image") next.image = defaultImageSettings(preset === "google" ? "gemini-generate-content" : preset === "openrouter" ? "openrouter-images" : preset === "seedance" ? "volcengine-images" : "openai-images", modelId);
     else if (usage === "video") next.video = defaultVideoSettings(preset === "seedance" ? "seedance" : "openrouter-videos");
     else next["3d"] = defaultModel3DSettings("standard", preset === "tripo" ? "tripo" : preset === "hyper3d" ? "hyper3d" : "meshy");
     onChange(next);
   }
   const image = usages.image;
+  const referenceDefault = knownImageReferenceLimit(modelId);
   const video = usages.video;
   const model3d = usages["3d"];
   return <>
@@ -41,9 +43,10 @@ export function CustomModelUsageFields({ usages, preset, onChange }: {
         <ChoiceFields label="Image resolutions" options={IMAGE_RESOLUTIONS.filter((value) => value !== "512" || image.protocol === "gemini-generate-content" || image.protocol === "openrouter-images")} value={image.resolutions} onChange={(resolutions) => onChange({ ...usages, image: { ...image, resolutions } })} />
         <ChoiceFields label="Image aspect ratios" options={IMAGE_ASPECT_RATIOS} value={image.aspectRatios} onChange={(aspectRatios) => onChange({ ...usages, image: { ...image, aspectRatios } })} />
         <div className="project-settings-field-row">
-          <NumberField label="Max reference images" value={image.maxReferenceImages} min={0} max={14} onChange={(maxReferenceImages) => onChange({ ...usages, image: { ...image, maxReferenceImages } })} />
+          <NumberField label="Max reference images" value={image.maxReferenceImages} min={0} max={IMAGE_MAX_REFERENCE_IMAGES} onChange={(maxReferenceImages) => onChange({ ...usages, image: { ...image, maxReferenceImages } })} />
           <label><span>Max outputs</span><select value={image.maxOutputs} onChange={(event) => onChange({ ...usages, image: { ...image, maxOutputs: Number(event.target.value) as typeof image.maxOutputs } })}>{IMAGE_OUTPUT_COUNTS.map((count) => <option key={count}>{count}</option>)}</select></label>
         </div>
+        {referenceDefault !== undefined && referenceDefault !== image.maxReferenceImages ? <button className="settings-secondary-button" type="button" onClick={() => onChange({ ...usages, image: { ...image, maxReferenceImages: referenceDefault } })}>Use model default ({referenceDefault} references)</button> : null}
       </details>
     </div> : null}
     {video ? <div className="custom-model-use-settings">
