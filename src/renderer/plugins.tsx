@@ -1,5 +1,5 @@
 import { useReadyRuntimeGeneration } from "./runtime-connection.js";
-import { AddMcpPluginDialog, PluginConfigurationPanel, PluginMcpPanel } from "./plugin-controls.js";
+import { AddMcpPluginDialog, PluginConfigurationPanel, PluginMcpPanel, PluginUninstallButton } from "./plugin-controls.js";
 import { PluginBuilderSessions } from "./plugin-builder.js";
 import { openPluginBuilder } from "./plugin-builder-navigation.js";
 import {
@@ -663,9 +663,7 @@ function PluginManagement({ plugin, updating, onBrowse, onRemove, onToggle }: {
     </dl>
     {plugin.installed ? <div className="plugin-section-actions">
       <button className="plugin-detail-secondary" type="button" disabled={updating} onClick={() => onToggle(!plugin.enabled)}>{plugin.enabled ? "Disable" : "Enable"}</button>
-      {plugin.source.type !== "builtIn" ? <button className="plugin-detail-secondary" type="button" disabled={updating} onClick={() => {
-        if (window.confirm(`Uninstall “${plugin.displayName}”?`)) onRemove();
-      }}>Uninstall</button> : null}
+      <PluginUninstallButton plugin={plugin} disabled={updating} onUninstall={onRemove} />
       {canBrowse ? <button className="plugin-detail-secondary" type="button" disabled={updating} onClick={onBrowse}>Open folder</button> : null}
     </div> : null}
   </section>;

@@ -4,12 +4,12 @@ import type { PluginDetail } from "../shared/plugins.js";
 import { pluginComponentKey } from "../shared/plugins.js";
 import { preferredAgentModel } from "../shared/agent-models.js";
 import { clampReasoningLevel } from "../shared/reasoning.js";
-import { abortPluginSetup, installPluginDraft, listPluginSetups, promptPluginSetup, readPluginDraft,
-  readPluginDraftFile, readPluginSetup, readPlugin, readPluginSkill, testPluginDraft, updatePluginSettings, waitForRuntime } from "./api.js";
+import { abortPluginSetup, deletePluginSetup, installPluginDraft, listPluginSetups, promptPluginSetup, readPluginDraft,
+  readPluginDraftFile, readPluginSetup, readPlugin, readPluginSkill, testPluginDraft, uninstallPlugin, updatePluginSettings, waitForRuntime } from "./api.js";
 import { AgentTimeline } from "./agent-timeline.js";
 import { useAgentModels } from "./model-selector.js";
 import { PromptBox } from "./prompt-box.js";
-import { PluginConfigurationPanel, PluginMcpPanel } from "./plugin-controls.js";
+import { PluginConfigurationPanel, PluginMcpPanel, PluginUninstallButton } from "./plugin-controls.js";
 import { WorkspaceFileBrowser } from "./coding-workspace.js";
 import { HighlightedCode } from "./highlighted-code.js";
 import { MarkdownContent } from "./markdown-content.js";
@@ -19,10 +19,10 @@ import { ComposerActions } from "./composer-actions.js";
 import { readChatLayout } from "./chat-layout.js";
 import { pluginBuilderHash, pluginHash, settingsHash } from "./routes.js";
 import { useReadyRuntimeGeneration } from "./runtime-connection.js";
-import { readPluginBuilderInput, savePluginBuilderInput } from "./plugin-builder-drafts.js";
+import { readPluginBuilderInput, removePluginBuilderInput, savePluginBuilderInput } from "./plugin-builder-drafts.js";
 import { openPluginBuilder } from "./plugin-builder-navigation.js";
-import { ArrowLeft, Check, ChevronRight, FileCode2, FileText, Folder, LoaderCircle, Package, MessageSquarePlus, PanelToggle,
-  Plug, RefreshCw, Settings, WandSparkles } from "./icons.js";
+import { ArrowLeft, Check, ChevronRight, FileCode2, FileText, LoaderCircle, Package, MessageSquarePlus, PanelToggle,
+  Plug, RefreshCw, Settings, Trash2 } from "./icons.js";
 import "./plugin-builder.css";
 
 export function PluginBuilderSessions() {
@@ -73,7 +73,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   const model = preferredAgentModel(catalog.models, input.model ?? state?.model, catalog.defaultModel);
   const reasoning = model ? clampReasoningLevel(input.reasoningLevel ?? state?.reasoningLevel ?? catalog.defaultReasoningLevel, model.reasoningLevels) : undefined;
   const disabled = Boolean(state?.busy || operation);
-  const upToDate = Boolean(draft?.revision && draft.revision === draft.installedRevision);
+  const upToDate = Boolean(installed?.installed && draft?.revision && draft.revision === draft.installedRevision);
 
   useEffect(() => { savePluginBuilderInput(sessionId, input, window.localStorage); }, [sessionId, input]);
   useEffect(() => {
@@ -122,7 +122,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   async function refresh() {
     const [next, preview] = await Promise.all([readPluginSetup(sessionId), readPluginDraft(sessionId)]);
     setState(next); setDraft(preview);
-    if (next.pluginId) setInstalled(await readPlugin(next.pluginId));
+    setInstalled(next.pluginId ? await readPlugin(next.pluginId) : undefined);
   }
   async function send() {
     if (!state || !model || !input.prompt.trim() || disabled) return;
@@ -189,6 +189,19 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
           <div className="viewer-publish">
             <button className="icon-button pane-header-action" aria-label="Refresh plugin preview" title="Refresh plugin preview" type="button" disabled={disabled} onClick={() => void action("refreshing", refresh)}><RefreshCw size={14} /></button>
             {state?.pluginId ? <button className="icon-button pane-header-action" type="button" title="Open plugin" aria-label="Open plugin" onClick={() => { window.location.hash = pluginHash(state.pluginId!); }}><ChevronRight size={14} /></button> : null}
+            {installed?.installed ? <PluginUninstallButton plugin={installed} disabled={disabled} compact onUninstall={() => void action("uninstalling", async () => {
+              await uninstallPlugin(installed.id);
+              await refresh();
+            })} /> : state ? <button className="icon-button pane-header-action" type="button" disabled={disabled}
+              title={draft?.path ? "Delete plugin draft" : "Delete workspace"} aria-label={draft?.path ? "Delete plugin draft" : "Delete workspace"}
+              onClick={() => {
+                if (!window.confirm(`Delete “${state.title}”? This permanently deletes its draft files and conversation.`)) return;
+                void action("deleting", async () => {
+                  await deletePluginSetup(sessionId);
+                  removePluginBuilderInput(sessionId, window.localStorage);
+                  goToPlugins();
+                });
+              }}><Trash2 size={14} /></button> : null}
             {draftPlugin ? <button className="publish-button workspace-publish-button" type="button" disabled={disabled || Boolean(draft?.errors.length) || upToDate} onClick={() => void action("installing", async () => {
               if (!draft?.revision) return;
               setState(await installPluginDraft(sessionId, draft.revision)); await refresh();
@@ -196,15 +209,13 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
           </div>
         </header>
         <div className={`plugin-builder-preview-content is-${view}`}>
-          {view === "overview" && draft?.errors.length ? <p className="plugin-builder-error" role="alert">The draft needs changes: {draft.errors.join(" ")}</p> : null}
-          {view === "overview" ? plugin ? <PluginOverview plugin={plugin} installed={upToDate || Boolean(installed && !draftPlugin)} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} onTry={prefill} /> : <EmptyView icon={Package} title="Plugin preview" text="Your plugin's skills, tools, and setup appear here when a draft is ready." /> : null}
+          {view === "overview" && draft?.errors.length ? <p className="plugin-builder-error" role="alert">{draft.errors.join(" ")}</p> : null}
+          {view === "overview" ? plugin ? <PluginOverview plugin={plugin} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} /> : <EmptyView label="No draft" /> : null}
           {view === "files" ? <PluginFiles sessionId={sessionId} draft={draft} installed={installed} request={fileRequest} /> : null}
           {view === "configuration" ? plugin ? <>
-            <div className="plugin-builder-section-title"><h2>Configuration</h2><p>Enter service credentials here. They are stored separately from the plugin and conversation.</p></div>
             <fieldset className="plugin-builder-config" disabled={disabled}>
-              <PluginConfigurationPanel key={`${sessionId}:${draft?.revision ?? plugin.id}`} plugin={plugin} setupId={draftPlugin ? sessionId : undefined} onChanged={() => void refresh().catch(cause => setError(message(cause)))} />
+              <PluginConfigurationPanel key={`${sessionId}:${draft?.revision ?? plugin.id}`} plugin={plugin} setupId={draftPlugin ? sessionId : undefined} compact onChanged={() => void refresh().catch(cause => setError(message(cause)))} />
             </fieldset>
-            {!Object.keys(plugin.configuration ?? {}).length ? <p className="plugin-builder-notice">This plugin has no configuration fields.</p> : null}
             {!draftPlugin && installed ? <PluginMcpPanel plugin={installed} onChanged={() => void refresh().catch(cause => setError(message(cause)))} onAssist={() => { setView("overview"); prefill("Inspect this plugin's configuration and diagnose any connection problems. Report what needs to be changed before making changes."); }} onToggle={(id, enabled) => void action("configuring", async () => {
               const components = Object.fromEntries([
                 ...installed.skills.map(skill => [pluginComponentKey("skill", skill.id), skill.enabled]),
@@ -213,9 +224,9 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
               await updatePluginSettings(installed.id, { enabled: installed.enabled, components: { ...components, [pluginComponentKey("mcp", id)]: enabled } });
               await refresh();
             })} /> : null}
-            {draftPlugin?.mcpServers?.some(server => server.transport === "http") ? <p className="plugin-builder-notice">If a service needs browser authorization, install the plugin and authorize it from its plugin page.</p> : null}
-          </> : <EmptyView icon={Settings} title="No configuration yet" text="Fields appear when the plugin draft is ready." /> : null}
-          {view === "checks" ? !draft?.path && installed ? <div className="plugin-builder-section-title"><h2>Check your plugin</h2><p>Test connected services and manage authorization in Configuration. Try a workflow from the plugin page in a project.</p><button type="button" className="plugin-detail-secondary" onClick={() => setView("configuration")}>Check connections<ChevronRight size={14} /></button></div> : <PluginChecks draft={draft} disabled={disabled} operation={operation} onConfigure={() => setView("configuration")} onTest={server => void action(`test:${server}`, async () => {
+            {!Object.keys(plugin.configuration ?? {}).length && !(!draftPlugin && installed && (installed.mcpServers?.length || installed.connections.length)) ? <EmptyView label="No configuration" /> : null}
+          </> : <EmptyView label="No configuration" /> : null}
+          {view === "checks" ? !draft?.path && installed ? installed.mcpServers?.length || installed.connections.length ? <button type="button" className="plugin-detail-secondary" onClick={() => setView("configuration")}>Test connections<ChevronRight size={14} /></button> : <EmptyView label="No checks" /> : <PluginChecks draft={draft} disabled={disabled} operation={operation} onTest={server => void action(`test:${server}`, async () => {
             if (!draft?.revision) return;
             await testPluginDraft(sessionId, server, draft.revision); await refresh();
           })} /> : null}
@@ -226,17 +237,14 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   function setFileRequest(file: string) { updateFileRequest({ path: file, id: Date.now() }); }
 }
 
-function PluginOverview({ plugin, installed, onChooseView, onChooseFile, onTry }: {
-  plugin: PluginDetail; installed: boolean; onChooseView: (view: BuilderView) => void; onChooseFile: (file: string) => void; onTry: (prompt: string) => void;
+function PluginOverview({ plugin, onChooseView, onChooseFile }: {
+  plugin: PluginDetail; onChooseView: (view: BuilderView) => void; onChooseFile: (file: string) => void;
 }) {
   return <div className="plugin-builder-overview">
-    <div className="plugin-builder-overview-heading"><div className="plugin-builder-icon"><Package size={26} /></div><span>{installed ? "INSTALLED PLUGIN" : "PLUGIN DRAFT"}</span><h2>{plugin.displayName}</h2><p>{plugin.description}</p><small>Version {plugin.version ?? "unversioned"}</small></div>
-    {installed ? <div className="plugin-builder-result" role="status"><Check size={16} /><span>Installed in your studio. Open the plugin page to try it in a project.</span><a href={pluginHash(plugin.id)}>Open plugin<ChevronRight size={14} /></a></div> : null}
-    {plugin.longDescription ? <div className="plugin-builder-description"><MarkdownContent text={plugin.longDescription} /></div> : null}
-    <section><div className="plugin-builder-section-heading"><h3>Skills</h3><span>{plugin.skills.length}</span></div>{plugin.skills.length ? plugin.skills.map(skill => <button className="plugin-builder-component" type="button" key={skill.id} onClick={() => onChooseFile(skill.id)}><FileText size={17} /><span><strong>{skill.name}</strong><small>{skill.description ?? "Workflow instructions"}</small></span><ChevronRight size={14} /></button>) : <p className="plugin-builder-muted">No Skills in this plugin.</p>}</section>
-    <section><div className="plugin-builder-section-heading"><h3>MCP services</h3><span>{plugin.mcpServers?.length ?? 0}</span></div>{plugin.mcpServers?.length ? plugin.mcpServers.map(server => <button className="plugin-builder-component" type="button" key={server.id} onClick={() => onChooseView("checks")}><Plug size={17} /><span><strong>{server.name}</strong><small>{server.transport === "stdio" ? "Local command" : "HTTP service"}</small></span><ChevronRight size={14} /></button>) : <p className="plugin-builder-muted">No connected services required.</p>}</section>
-    {Object.keys(plugin.configuration ?? {}).length ? <section><div className="plugin-builder-section-heading"><h3>Configuration</h3><button type="button" onClick={() => onChooseView("configuration")}>Configure<ChevronRight size={13} /></button></div><div className="plugin-builder-fields">{Object.entries(plugin.configuration ?? {}).map(([id, field]) => <span key={id}>{field.label}<small>{field.type === "secret" ? "Credential" : field.type}{field.required ? " · Required" : " · Optional"}</small></span>)}</div></section> : null}
-    {plugin.defaultPrompts?.length ? <section><div className="plugin-builder-section-heading"><h3>Example requests</h3></div>{plugin.defaultPrompts.map(prompt => <div className="plugin-builder-example" key={prompt}><p>{prompt}</p><button type="button" onClick={() => onTry(`Refine the plugin so it handles this example well:\n${prompt}`)}>Refine this example<ChevronRight size={13} /></button></div>)}</section> : null}
+    <div className="plugin-builder-overview-heading"><h2>{plugin.displayName}</h2>{plugin.version ? <small>v{plugin.version}</small> : null}</div>
+    {plugin.description ? <p className="plugin-builder-description">{plugin.description}</p> : null}
+    {plugin.skills.length ? <section><div className="plugin-builder-section-heading"><h3>Skills</h3><span>{plugin.skills.length}</span></div>{plugin.skills.map(skill => <button className="plugin-builder-component" type="button" key={skill.id} title={skill.description} onClick={() => onChooseFile(skill.id)}><FileText size={15} /><strong>{skill.name}</strong><ChevronRight size={14} /></button>)}</section> : null}
+    {plugin.mcpServers?.length ? <section><div className="plugin-builder-section-heading"><h3>MCP services</h3><span>{plugin.mcpServers.length}</span></div>{plugin.mcpServers.map(server => <button className="plugin-builder-component" type="button" key={server.id} onClick={() => onChooseView("checks")}><Plug size={15} /><strong>{server.name}</strong><ChevronRight size={14} /></button>)}</section> : null}
   </div>;
 }
 
@@ -260,7 +268,7 @@ function PluginFiles({ sessionId, draft, installed, request }: { sessionId: stri
       .catch(cause => { if (current) setError(message(cause)); });
     return () => { current = false; };
   }, [sessionId, active, draft?.revision, installed?.id]);
-  if (!files.length) return <EmptyView icon={Folder} title="No draft files yet" text="The plugin's manifest, Skills, and supporting files appear here after the agent prepares a draft." />;
+  if (!files.length) return <EmptyView label="No files" />;
   return <WorkspaceFileBrowser files={files} selectedPath={active} onSelect={setSelected} loading={!file && !error} error={error}
     selectedFile={file ? { ...file, size: files.find(entry => entry.path === file.path)?.size ?? 0, binary: false } : undefined}
     fileActions={active?.endsWith(".md") ? <div className="file-open-actions"><button type="button" title={source ? "Read document" : "View source"} aria-label={source ? "Read document" : "View source"} onClick={() => setSource(value => !value)}>{source ? <FileText size={14} /> : <FileCode2 size={14} />}</button></div> : null}
@@ -270,27 +278,24 @@ function PluginFiles({ sessionId, draft, installed, request }: { sessionId: stri
   />;
 }
 
-function PluginChecks({ draft, disabled, operation, onConfigure, onTest }: {
-  draft?: PluginDraft; disabled: boolean; operation?: string; onConfigure: () => void; onTest: (server: string) => void;
+function PluginChecks({ draft, disabled, operation, onTest }: {
+  draft?: PluginDraft; disabled: boolean; operation?: string; onTest: (server: string) => void;
 }) {
-  if (!draft?.path) return <EmptyView icon={Check} title="Checks start with a draft" text="Once the plugin is prepared, check its package and test any connected services." />;
+  if (!draft?.path) return <EmptyView label="No checks" />;
   return <div className="plugin-builder-checks">
-    <div className="plugin-builder-section-title"><h2>Check your plugin</h2><p>Package checks, service connections, and workflow testing are separate steps.</p></div>
-    <div className={`plugin-builder-check ${draft.errors.length ? "has-error" : "is-passed"}`}><Check size={18} /><span><strong>Package structure</strong><small>{draft.errors.length ? "The draft needs changes before installation." : "Manifest, declared Skills, MCP definitions, and file paths are valid."}</small></span><small>{draft.errors.length ? "Needs changes" : "Passed"}</small></div>
+    <div className={`plugin-builder-check ${draft.errors.length ? "has-error" : "is-passed"}`}><Check size={18} /><span><strong>Package structure</strong></span><small>{draft.errors.length ? "Needs changes" : "Passed"}</small></div>
     {draft.errors.map(error => <p className="plugin-builder-error" role="alert" key={error}>{error}</p>)}
     {draft.plugin?.mcpServers?.map(server => {
       const check = draft.checks?.[server.id];
       const current = check?.revision === draft.revision;
       const result = current ? check?.result : undefined;
-      return <div className="plugin-builder-service-check" key={server.id}><div className="plugin-builder-check"><Plug size={18} /><span><strong>{server.name}</strong><small>{result?.status === "connected" ? `Connected · ${result.toolCount} tool${result.toolCount === 1 ? "" : "s"} discovered` : result?.status === "needs-auth" ? "Authorization required. Install and authorize from the plugin page." : result?.status === "failed" ? "Connection failed" : check ? "Draft changed. Run this check again." : "Connection has not been tested."}</small></span><button className="plugin-detail-secondary" type="button" disabled={disabled || Boolean(draft.errors.length)} onClick={() => onTest(server.id)}>{operation === `test:${server.id}` ? <LoaderCircle className="spin" size={12} /> : null}Test connection</button></div>{result?.message ? <details className="plugin-builder-notice"><summary>Connection details</summary><pre>{result.message}</pre></details> : null}</div>;
+      return <div className="plugin-builder-service-check" key={server.id}><div className="plugin-builder-check"><Plug size={18} /><span><strong>{server.name}</strong><small>{result?.status === "connected" ? `Connected · ${result.toolCount} tool${result.toolCount === 1 ? "" : "s"}` : result?.status === "needs-auth" ? "Authorization required" : result?.status === "failed" ? "Connection failed" : check ? "Outdated" : "Not tested"}</small></span><button className="plugin-detail-secondary" type="button" aria-label={`Test ${server.name} connection`} disabled={disabled || Boolean(draft.errors.length)} onClick={() => onTest(server.id)}>{operation === `test:${server.id}` ? <LoaderCircle className="spin" size={12} /> : null}Test</button></div>{result?.message && result.status !== "connected" ? <details className="plugin-builder-notice"><summary>Details</summary><pre>{result.message}</pre></details> : null}</div>;
     })}
-    {Object.keys(draft.plugin?.configuration ?? {}).length ? <button className="plugin-detail-secondary" type="button" onClick={onConfigure}>Review configuration<ChevronRight size={14} /></button> : null}
-    <div className="plugin-builder-check"><WandSparkles size={18} /><span><strong>Workflow behavior</strong><small>After installing, use an example request in a project to check the actual result.</small></span><small>Not tested</small></div>
   </div>;
 }
 
-function EmptyView({ icon: Icon, title, text }: { icon: typeof Package; title: string; text: string }) {
-  return <div className="plugin-builder-preview-empty"><div className="plugin-builder-icon"><Icon size={20} /></div><h2>{title}</h2><p>{text}</p></div>;
+function EmptyView({ label }: { label: string }) {
+  return <div className="plugin-builder-preview-empty"><span>{label}</span></div>;
 }
 function statusLabel(status: PluginSetupSummary["status"]): string {
   return { idle: "Ready to build", working: "Building…", ready: "Draft ready to review", installed: "Installed", interrupted: "Run interrupted", error: "Needs attention" }[status];

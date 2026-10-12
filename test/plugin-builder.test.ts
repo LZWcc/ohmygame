@@ -101,6 +101,71 @@ describe("Plugin Builder", () => {
     expect((await setup.draft(state.id)).errors.join(" ")).toContain("symbolic links");
   });
 
+  it("restores an uninstalled plugin to a draft and supports reinstalling it after restart", async () => {
+    const { setup, directory, local, manager } = await environment();
+    const state = await setup.create();
+    const draft = await setup.prepare(state.id, await writeDraft(directory, state.id));
+    await setup.installDraft(state.id, draft.revision!);
+    await local.remove("personal:design-review");
+    await setup.close();
+    const resumed = manager(); cleanup.push(() => resumed.close());
+    expect(await resumed.read(state.id)).toMatchObject({ status: "ready", pluginId: undefined });
+    const preview = await resumed.draft(state.id);
+    expect(preview.installedRevision).toBeUndefined();
+    expect(preview.files).toEqual(draft.files);
+    expect(await resumed.installDraft(state.id, preview.revision!)).toMatchObject({ status: "installed", pluginId: "personal:design-review" });
+  });
+
+  it("deletes a draft workspace and only its own saved configuration", async () => {
+    const { setup, directory, app, capabilities, manager } = await environment();
+    const first = await setup.create(), second = await setup.create();
+    await setup.prepare(first.id, await writeDraft(directory, first.id, true));
+    await setup.prepare(second.id, await writeDraft(directory, second.id, true));
+    await setup.configuration(first.id, { key: "first-private-key" });
+    await setup.configuration(second.id, { key: "second-private-key" });
+    const removed = await app.inject({ method: "DELETE", url: `/plugins/setup-sessions/${first.id}` });
+    expect(removed.statusCode, removed.body).toBe(204);
+    expect((await app.inject({ method: "GET", url: `/plugins/setup-sessions/${first.id}` })).statusCode).toBe(404);
+    await expect(readFile(path.join(directory, "plugin-setup", first.id, "state.json"))).rejects.toMatchObject({ code: "ENOENT" });
+    const config = JSON.parse(await readFile(capabilities.configuration.filePath, "utf8"));
+    expect(config.plugins[`draft:${first.id}`]).toBeUndefined();
+    expect(Object.keys(config.credentials)).toHaveLength(1);
+    expect((await setup.configuration(second.id)).configuredSecrets).toEqual(["key"]);
+    const resumed = manager(); cleanup.push(() => resumed.close());
+    expect((await resumed.list()).map(item => item.id)).toEqual([second.id]);
+  });
+
+  it("blocks workspace deletion while its plugin is installed", async () => {
+    const { setup, directory, app, local } = await environment();
+    const state = await setup.create();
+    const root = await writeDraft(directory, state.id);
+    const draft = await setup.prepare(state.id, root);
+    await setup.installDraft(state.id, draft.revision!);
+    const blocked = await app.inject({ method: "DELETE", url: `/plugins/setup-sessions/${state.id}` });
+    expect(blocked.statusCode).toBe(409);
+    expect(blocked.json().error).toContain("Uninstall");
+    expect(await setup.file(state.id, "skills/review/SKILL.md")).toHaveProperty("content");
+    expect((await local.list()).plugins).toHaveLength(1);
+    await local.remove("personal:design-review");
+    expect((await app.inject({ method: "DELETE", url: `/plugins/setup-sessions/${state.id}` })).statusCode).toBe(204);
+  });
+
+  it("blocks deleting a workspace with an in-progress configuration operation", async () => {
+    const { setup, directory, app, capabilities } = await environment();
+    const state = await setup.create();
+    await setup.prepare(state.id, await writeDraft(directory, state.id, true));
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const update = capabilities.configuration.update.bind(capabilities.configuration);
+    const spy = vi.spyOn(capabilities.configuration, "update").mockImplementation(async (...args) => { await gate; return update(...args); });
+    const saving = setup.configuration(state.id, { key: "private-key" });
+    try {
+      await vi.waitFor(async () => expect((await setup.read(state.id)).busy).toBe(true));
+      expect((await app.inject({ method: "DELETE", url: `/plugins/setup-sessions/${state.id}` })).statusCode).toBe(409);
+    } finally { release(); await saving; spy.mockRestore(); }
+    expect((await setup.read(state.id)).busy).toBe(false);
+  });
+
   it("configures and probes a draft without installing it or exposing credentials, and invalidates checks after configuration changes", async () => {
     const { setup, directory, local, app } = await environment();
     const state = await setup.create();

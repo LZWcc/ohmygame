@@ -21,3 +21,6 @@ export function readPluginBuilderInput(id: string, storage?: Pick<Storage, "getI
 export function savePluginBuilderInput(id: string, input: PluginBuilderInput, storage?: Pick<Storage, "setItem">): void {
   try { storage?.setItem(PREFIX + id, JSON.stringify(input)); } catch { /* The input still works when storage is unavailable. */ }
 }
+export function removePluginBuilderInput(id: string, storage?: Pick<Storage, "removeItem">): void {
+  try { storage?.removeItem(PREFIX + id); } catch { /* Storage may be unavailable. */ }
+}

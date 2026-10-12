@@ -115,6 +115,20 @@ export class PluginSetupManager {
 
       this.#states.set(id, state);
     }
+    if (state.pluginId && !state.busy) {
+      const pluginId = state.pluginId;
+      const plugin = await this.plugins.read(pluginId);
+      if (!plugin?.installed && state.pluginId === pluginId && !state.busy) {
+        state.pluginId = undefined;
+        state.installedRevision = undefined;
+        state.checks = {};
+        if (state.status === "installed") state.status = state.draftPath ? "ready" : "idle";
+        state.updatedAt = Date.now();
+        this.#sessions.get(id)?.dispose();
+        this.#sessions.delete(id);
+        await this.#save(state);
+      }
+    }
     const { draftPath: _path, installedRevision: _revision, checks: _checks, ...publicState } = structuredClone(state);
     return { ...publicState, messages: this.#messages(id), turns: this.#turns(id, state) };
   }
@@ -127,6 +141,34 @@ export class PluginSetupManager {
     const results = await Promise.allSettled(entries.filter(id => /^[0-9a-f-]{36}$/.test(id)).map(id => this.read(id)));
     return results.flatMap(result => result.status === "fulfilled" ? [summary(result.value)] : [])
       .sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+  async remove(id: string): Promise<void> {
+    await this.read(id);
+    const state = this.#states.get(id)!;
+    if (state.busy) throw new Error("Wait for the builder to finish before deleting its workspace");
+    state.busy = true;
+    try {
+      if (state.pluginId && (await this.plugins.read(state.pluginId))?.installed)
+        throw new Error("Uninstall the plugin before deleting its workspace");
+      await this.#writes.get(id);
+      this.#sessions.get(id)?.dispose();
+      this.#sessions.delete(id);
+      const directory = this.#directory(id);
+      const removed = `${directory}.removed-${randomUUID()}`;
+      await rename(directory, removed);
+      try {
+        await this.capabilities.configuration.remove(`draft:${id}`);
+      } catch (cause) {
+        await rename(removed, directory);
+        throw cause;
+      }
+      this.#states.delete(id);
+      this.#history.delete(id);
+      this.#writes.delete(id);
+      this.#aborted.delete(id);
+      this.#live.delete(id);
+      await rm(removed, { recursive: true, force: true });
+    } finally { state.busy = false; }
   }
   #turns(id: string, state: SetupRuntimeState): Turn[] {
     const items = conversationItems(this.#sessionManager(id).getBranch(), !state.busy);
@@ -590,6 +632,15 @@ export function registerPluginSetupRoutes(
   app.get<{ Params: { id: string } }>("/plugins/setup-sessions/:id/draft", async (request, reply) => {
     try { return await manager.draft(request.params.id); }
     catch (cause) { return reply.code(400).send({ error: String(cause) }); }
+  });
+  app.delete<{ Params: { id: string } }>("/plugins/setup-sessions/:id", async (request, reply) => {
+    try {
+      await manager.remove(request.params.id);
+      return reply.code(204).send();
+    } catch (cause) {
+      return reply.code((cause as NodeJS.ErrnoException).code === "ENOENT" ? 404 : 409)
+        .send({ error: cause instanceof Error ? cause.message : String(cause) });
+    }
   });
   app.get<{ Params: { id: string }; Querystring: { path: string } }>("/plugins/setup-sessions/:id/file", {
     schema: { querystring: { type: "object", required: ["path"], additionalProperties: false, properties: { path: { type: "string", minLength: 1 } } } },

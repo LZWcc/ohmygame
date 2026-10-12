@@ -15,15 +15,30 @@ import {
   savePluginMcpDefinition,
   testPluginMcp,
 } from "./api.js";
-import { LoaderCircle, Plug, WandSparkles } from "./icons.js";
+import { LoaderCircle, Plug, Trash2, WandSparkles } from "./icons.js";
+
+export function PluginUninstallButton({ plugin, disabled, compact = false, onUninstall }: {
+  plugin: Pick<PluginDetail, "displayName" | "installed" | "source">;
+  disabled?: boolean;
+  compact?: boolean;
+  onUninstall: () => void;
+}) {
+  if (!plugin.installed || plugin.source.type === "builtIn") return null;
+  return <button className={compact ? "icon-button pane-header-action" : "plugin-detail-secondary"} type="button"
+    disabled={disabled} title="Uninstall plugin" aria-label="Uninstall plugin" onClick={() => {
+      if (window.confirm(`Uninstall “${plugin.displayName}”?`)) onUninstall();
+    }}>{compact ? <Trash2 size={14} /> : "Uninstall"}</button>;
+}
 
 export function PluginConfigurationPanel({
   plugin,
   setupId,
+  compact = false,
   onChanged,
 }: {
   plugin: PluginDetail;
   setupId?: string;
+  compact?: boolean;
   onChanged: () => void;
 }) {
   const [config, setConfig] = useState<PluginConfigurationView>();
@@ -51,7 +66,7 @@ export function PluginConfigurationPanel({
   if (!config && !Object.keys(plugin.configuration ?? {}).length) return null;
   return (
     <section className="plugin-components plugin-configuration">
-      <h2>Configuration</h2>
+      {!compact ? <h2>Configuration</h2> : null}
       {config ? (
         <form
           onSubmit={(event) => {
@@ -63,7 +78,7 @@ export function PluginConfigurationPanel({
             const value =
               values[key] ?? config.values[key] ?? field.default ?? "";
             return (
-              <label key={key}>
+              <label key={key} title={compact ? field.description : undefined}>
                 <span>
                   {field.label}
                   {field.required ? " *" : ""}
@@ -110,7 +125,7 @@ export function PluginConfigurationPanel({
                     }
                   />
                 )}
-                {field.description ? <small>{field.description}</small> : null}
+                {!compact && field.description ? <small>{field.description}</small> : null}
                 {field.type === "secret" &&
                 config.configuredSecrets.includes(key) ? (
                   <button
@@ -156,7 +171,7 @@ export function PluginConfigurationPanel({
       setConfig(await (setupId ? savePluginDraftConfiguration(setupId, values) : savePluginConfiguration(plugin.id, values)));
       setValues({});
       setNotice(
-        setupId ? "Saved for this draft. Credentials carry over when you install it." : "Saved. Active conversations apply changes after the current turn finishes.",
+        compact ? "Saved" : setupId ? "Saved for this draft. Credentials carry over when you install it." : "Saved. Active conversations apply changes after the current turn finishes.",
       );
       onChanged();
     } catch (cause) {

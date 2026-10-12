@@ -1113,6 +1113,9 @@ export async function createPluginSetup(pluginId?: string): Promise<import("../s
 export async function readPluginSetup(id: string): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
   return request(`/plugins/setup-sessions/${encodeURIComponent(id)}`);
 }
+export async function deletePluginSetup(id: string): Promise<void> {
+  await request(`/plugins/setup-sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
 export async function promptPluginSetup(id: string, prompt: string, model: AgentModelRef, reasoningLevel?: import("../shared/contracts.js").AgentReasoningLevel): Promise<import("../shared/plugin-setup.js").PluginSetupState> {
   return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/prompt`, { method: "POST", body: JSON.stringify({ prompt, model, reasoningLevel }) });
 }
