@@ -173,9 +173,10 @@ export async function inspectCanvasBoard(workspace: string, id: string): Promise
     issues.push(contentNodeSizeIssue(node));
   }
   const board = { ...raw, editorLayout, nodes: raw.nodes.map((node) => applyCanvasNodeLayout(node, editorLayout.nodes[node.id]!)) };
+  // The file schemas were checked above; validate cross-node rules once.
   try { validateAssetCanvasDocument(board); }
   catch (cause) { throw new CanvasError(`canvas/${name}: ${cause instanceof Error ? cause.message : String(cause)}`); }
-  if (!isCanvasBoard(board) || board.id !== id) throw new CanvasError(`canvas/${name}: invalid node IDs or references`);
+  if (board.id !== id) throw new CanvasError(`canvas/${name}: board ID does not match its file name`);
   return { detail: { board, revision: revision([text, layoutText ?? ""]) }, issues };
 }
 async function writeCanvasBoard(workspace: string, board: CanvasBoard): Promise<CanvasBoardDetail> {
