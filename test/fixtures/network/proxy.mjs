@@ -9,6 +9,8 @@ import { connect } from "node:net";
 const sockets = new Set();
 const tunnels = [];
 let diagnosticAuthorized = false;
+let responsesAuthorized = false;
+let responsesRequests = 0;
 function serve(request, response) {
   request.resume();
   if (request.url.startsWith("/openai")) {
@@ -67,6 +69,7 @@ for (const server of servers)
     socket.on("close", () => sockets.delete(socket));
   });
 secure.on("upgrade", (request, socket) => {
+  if (request.url === "/v1/responses") responsesAuthorized ||= request.headers.authorization === "Bearer transport-probe";
   const accept = createHash("sha1")
     .update(
       request.headers["sec-websocket-key"] +
@@ -76,7 +79,29 @@ secure.on("upgrade", (request, socket) => {
   socket.write(
     `HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`,
   );
-  socket.on("data", () => socket.end(Buffer.from([0x88, 0])));
+  if (request.url !== "/v1/responses") { socket.on("data", () => socket.end(Buffer.from([0x88, 0]))); return; }
+  let buffer = Buffer.alloc(0);
+  socket.on("data", (chunk) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    while (buffer.length >= 2) {
+      let size = buffer[1] & 0x7f;
+      let offset = 2;
+      if (size === 126) { if (buffer.length < 4) return; size = buffer.readUInt16BE(2); offset = 4; }
+      if (size === 127) { if (buffer.length < 10) return; size = Number(buffer.readBigUInt64BE(2)); offset = 10; }
+      if (buffer.length < offset + 4 + size) return;
+      const mask = buffer.subarray(offset, offset + 4);
+      const data = Buffer.from(buffer.subarray(offset + 4, offset + 4 + size));
+      const opcode = buffer[0] & 0x0f;
+      buffer = buffer.subarray(offset + 4 + size);
+      if (opcode === 8) { socket.end(Buffer.from([0x88, 0])); return; }
+      for (let index = 0; index < data.length; index++) data[index] ^= mask[index % 4];
+      if (opcode !== 1 || JSON.parse(data.toString()).type !== "response.create") continue;
+      responsesRequests++;
+      const event = Buffer.from(JSON.stringify({ type: "response.completed", response: { id: "resp-network", status: "completed", output: [] } }));
+      const header = event.length < 126 ? Buffer.from([0x81, event.length]) : Buffer.from([0x81, 126, event.length >> 8, event.length & 0xff]);
+      socket.write(Buffer.concat([header, event]));
+    }
+  });
 });
 const port = (server) => server.address().port;
 proxy.on("connect", (request, client, head) => {
@@ -101,7 +126,7 @@ for (const server of servers) {
   await once(server, "listening");
 }
 process.send({ ipv4: port(ipv4), ipv6: port(ipv6), proxy: port(proxy) });
-process.on("message", () => process.send({ tunnels, diagnosticAuthorized }));
+process.on("message", () => process.send({ tunnels, diagnosticAuthorized, responsesAuthorized, responsesRequests }));
 process.once("SIGTERM", async () => {
   for (const socket of sockets) socket.destroy();
   await Promise.all(
