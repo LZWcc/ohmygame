@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import {
   IMAGE_ASPECT_RATIOS,
+  IMAGE_MAX_REFERENCE_IMAGES,
   IMAGE_OUTPUT_COUNTS,
   IMAGE_RESOLUTIONS,
   IMAGE_SIZES,
@@ -255,7 +256,7 @@ export class ToolRunner {
     if (resolution !== undefined && !isImageResolution(resolution)) throw new ToolRunError("Unsupported image resolution", 400);
     if (aspectRatio !== undefined && !isImageAspectRatio(aspectRatio)) throw new ToolRunError("Unsupported image aspect ratio", 400);
     if (!isImageOutputCount(outputs)) throw new ToolRunError("Unsupported image output count", 400);
-    if (imageInput && (imageInput.length > 14 || imageInput.some((image) => !isPromptImage(image, true)))) throw new ToolRunError("Up to 14 PNG, JPEG, or WebP images are supported", 400);
+    if (imageInput && (imageInput.length > IMAGE_MAX_REFERENCE_IMAGES || imageInput.some((image) => !isPromptImage(image, true)))) throw new ToolRunError(`Up to ${IMAGE_MAX_REFERENCE_IMAGES} PNG, JPEG, or WebP images are supported`, 400);
 
     const id = randomUUID();
     const temporary = path.join(this.#runsDirectory, `.${id}.tmp`);

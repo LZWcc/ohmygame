@@ -47,6 +47,38 @@ async function generate(app: ReturnType<typeof createApp>, tool: ToolId, payload
 }
 
 describe("unified custom media models", () => {
+  it("saves a GPT Image default and sends all 16 references through the generation route", async () => {
+    const request = vi.fn<typeof fetch>(async () => Response.json({ data: [{ b64_json: Buffer.from("generated").toString("base64") }] }));
+    const { app, save } = await fixture(request);
+    const { id } = await save([model("gpt-image-2", { image: defaultImageSettings("openai-images", "gpt-image-2") })]);
+    const images = Array.from({ length: 16 }, () => reference);
+    const payload = { prompt: "Compose references", resolution: "1K", aspectRatio: "1:1", imageModel: { provider: id, id: "gpt-image-2" }, images };
+    await generate(app, "generate-image", payload);
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls[0]?.[0]).toBe(`${connection.baseUrl}/images/edits`);
+    expect((request.mock.calls[0]?.[1]?.body as FormData).getAll("image[]")).toHaveLength(16);
+    const rejected = await app.inject({ method: "POST", url: "/tools/generate-image/jobs", payload: { ...payload, images: [...images, reference] } });
+    expect(rejected.statusCode).toBe(400);
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps saved single-image overrides and rejects extra references before contacting the endpoint", async () => {
+    const request = vi.fn<typeof fetch>();
+    const { app, save } = await fixture(request);
+    const { id } = await save([model("gpt-image-2", { image: { ...defaultImageSettings("openai-images", "gpt-image-2"), maxReferenceImages: 1 } })]);
+    const catalog = (await app.inject({ method: "GET", url: "/image-models/catalog" })).json();
+    expect(catalog.models).toContainEqual(expect.objectContaining({ provider: id, id: "gpt-image-2", maxReferenceImages: 1 }));
+    const created = await app.inject({ method: "POST", url: "/tools/generate-image/jobs", payload: {
+      prompt: "Compose references", resolution: "1K", aspectRatio: "1:1", imageModel: { provider: id, id: "gpt-image-2" }, images: [reference, reference],
+    } });
+    expect(created.statusCode).toBe(202);
+    await vi.waitFor(async () => {
+      const jobs = (await app.inject({ method: "GET", url: "/tool-jobs" })).json();
+      expect(jobs.find((job: { id: string }) => job.id === created.json().id)).toMatchObject({ status: "failed", error: "The selected image model supports up to 1 reference images" });
+    });
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("persists every use, exposes only language models to the SDK, and honours visibility and defaults after restart", async () => {
     const request = vi.fn<typeof fetch>(async () => { throw new Error("No model discovery should be needed"); });
     const { app, runtime, directory, save } = await fixture(request);
@@ -215,6 +247,7 @@ describe("unified custom media models", () => {
     const settings = (await store.customProvider(id))!;
     expect(settings.modelConfigurationVersion).toBe(2);
     expect(settings.models.map((model) => model.id)).toEqual(["chat", "gpt-image-1"]);
+    expect(settings.models.find((model) => model.id === "gpt-image-1")?.usages?.image?.maxReferenceImages).toBe(16);
     const updated = await app.inject({ method: "PUT", url: `/settings/models/providers/${id}/custom`, payload: { ...settings, hiddenModelIds: ["gpt-image-1"], models: settings.models.map((model) => model.id === "gpt-image-1" ? { ...model, name: "My image", usages: { image: { ...defaultImageSettings(), maxReferenceImages: 0 } } } : model) } });
     expect(updated.statusCode, updated.body).toBe(200);
     request.mockClear();
@@ -232,7 +265,7 @@ describe("unified custom media models", () => {
     expect((await app.inject({ method: "GET", url: "/image-models/catalog" })).json().models).toContainEqual(expect.objectContaining({ provider: id, id: modelId }));
     const migrated = (await app.inject({ method: "GET", url: `/settings/models/providers/${id}/custom` })).json();
     expect(migrated.models).toHaveLength(1);
-    expect(migrated.models[0]).toMatchObject({ id: modelId, name: "My existing model", usages: { language: true, image: { protocol: "gemini-generate-content" } } });
+    expect(migrated.models[0]).toMatchObject({ id: modelId, name: "My existing model", usages: { language: true, image: { protocol: "gemini-generate-content", maxReferenceImages: 14 } } });
     expect(runtime.getModels(id).map((model) => model.id)).toEqual([modelId]);
   });
 });

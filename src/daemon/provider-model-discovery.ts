@@ -1,4 +1,4 @@
-import { AGENT_REASONING_LEVELS, type CustomProviderModel, type CustomThinkingLevelMap, type DiscoveredProviderModels, type CustomProviderPreset, type CustomModelUsages } from "../shared/contracts.js";
+import { AGENT_REASONING_LEVELS, IMAGE_MAX_REFERENCE_IMAGES, type CustomProviderModel, type CustomThinkingLevelMap, type DiscoveredProviderModels, type CustomProviderPreset, type CustomModelUsages } from "../shared/contracts.js";
 import { defaultImageSettings, defaultModel3DSettings, defaultVideoSettings } from "../shared/custom-models.js";
 import { listOpenRouterImageModels, listOpenRouterVideoModels } from "./openrouter-media.js";
 import { normalizeCustomProvider } from "./provider-model-settings.js";
@@ -69,7 +69,7 @@ export async function discoverProviderModels(value: unknown, request: typeof fet
             if ("generationOptions" in item) previous.usages = { ...previous.usages, image: {
               protocol: "openrouter-images", resolutions: [...new Set(item.generationOptions.map((option) => option.resolution))],
               aspectRatios: [...new Set(item.generationOptions.map((option) => option.aspectRatio))],
-              maxReferenceImages: Math.min(14, item.maxReferenceImages ?? 0), maxOutputs: item.maxOutputs,
+              maxReferenceImages: Math.min(IMAGE_MAX_REFERENCE_IMAGES, item.maxReferenceImages ?? 0), maxOutputs: item.maxOutputs,
             } };
             else previous.usages = { ...previous.usages, video: { protocol: "openrouter-videos", resolutions: [...item.resolutions],
               aspectRatios: [...item.aspectRatios], durations: [...item.durations], maxReferenceImages: item.maxImageReferences,
@@ -102,7 +102,7 @@ function discoveredModel(value: unknown, api: string, catalog: CustomModelCatalo
   if (image || outputs.includes("image")) {
     const protocol = preset === "openrouter" ? "openrouter-images" : preset === "seedance" ? "volcengine-images" : google ? "gemini-generate-content" : image?.protocol ?? "openai-images";
     usages.image = image ? { protocol, resolutions: [...new Set(image.generationOptions.map((option) => option.resolution))],
-      aspectRatios: [...new Set(image.generationOptions.map((option) => option.aspectRatio))], maxReferenceImages: Math.min(14, image.maxReferenceImages ?? 1), maxOutputs: image.maxOutputs } : defaultImageSettings(protocol);
+      aspectRatios: [...new Set(image.generationOptions.map((option) => option.aspectRatio))], maxReferenceImages: Math.min(IMAGE_MAX_REFERENCE_IMAGES, image.maxReferenceImages ?? 1), maxOutputs: image.maxOutputs } : defaultImageSettings(protocol, id);
   }
   if (outputs.includes("video")) usages.video = defaultVideoSettings(preset === "seedance" ? "seedance" : "openrouter-videos");
   if (outputs.includes("3d") || outputs.includes("model") || preset === "meshy" || preset === "tripo" || preset === "hyper3d") usages["3d"] = model3DPreset(preset ?? "meshy", id)?.settings ?? defaultModel3DSettings("standard", preset === "tripo" ? "tripo" : preset === "hyper3d" ? "hyper3d" : "meshy");

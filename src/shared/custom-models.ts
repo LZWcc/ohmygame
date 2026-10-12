@@ -1,11 +1,12 @@
 import { protocolOperations } from "./model3d-operations.js";
 import {
-  IMAGE_ASPECT_RATIOS, IMAGE_OUTPUT_COUNTS, IMAGE_RESOLUTIONS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS,
+  IMAGE_ASPECT_RATIOS, IMAGE_MAX_REFERENCE_IMAGES, IMAGE_OUTPUT_COUNTS, IMAGE_RESOLUTIONS, VIDEO_ASPECT_RATIOS, VIDEO_RESOLUTIONS,
   type CustomImageModelSettings, type CustomModel3DSettings, type CustomModelUsages, type CustomProviderModel,
   type CustomProviderSettings, type CustomVideoModelSettings, type ImageModel, type ImageProtocol,
   type Model3DDefinition, type Model3DModel, type ProviderCapability, type VideoModel, type VideoProtocol,
 } from "./contracts.js";
 import { hyper3DCredits } from "./cloud-models.js";
+import { knownImageReferenceLimit } from "./image-reference-limits.js";
 
 export const MODEL_USAGE_LABELS: Record<ProviderCapability, string> = { language: "Language", image: "Image", video: "Video", "3d": "3D" };
 export const IMAGE_PROTOCOL_LABELS: Record<ImageProtocol, string> = {
@@ -21,8 +22,8 @@ export function modelUsageList(model: CustomProviderModel): ProviderCapability[]
   const usages = modelUsages(model);
   return (["language", "image", "video", "3d"] as const).filter((usage) => Boolean(usages[usage]));
 }
-export function defaultImageSettings(protocol: ImageProtocol = "openai-images"): CustomImageModelSettings {
-  return { protocol, resolutions: ["1K"], aspectRatios: ["1:1", "3:2", "2:3"], maxReferenceImages: 1, maxOutputs: 1 };
+export function defaultImageSettings(protocol: ImageProtocol = "openai-images", modelId = ""): CustomImageModelSettings {
+  return { protocol, resolutions: ["1K"], aspectRatios: ["1:1", "3:2", "2:3"], maxReferenceImages: knownImageReferenceLimit(modelId) ?? 1, maxOutputs: 1 };
 }
 export function defaultVideoSettings(protocol: VideoProtocol = "openrouter-videos"): CustomVideoModelSettings {
   return { protocol, resolutions: ["720p"], aspectRatios: ["16:9", "9:16", "1:1"], durations: [6], maxReferenceImages: 1, referenceModes: ["reference"] };
@@ -79,7 +80,7 @@ export function normalizeModelUsages(value: unknown): CustomModelUsages | undefi
     usages.image = { protocol: config.protocol as ImageProtocol, ...endpoint(config),
       resolutions: choices(config.resolutions, IMAGE_RESOLUTIONS.filter((value) => value !== "512" || config.protocol === "gemini-generate-content" || config.protocol === "openrouter-images"), "image resolutions"),
       aspectRatios: choices(config.aspectRatios, IMAGE_ASPECT_RATIOS, "image aspect ratios"),
-      maxReferenceImages: integer(config.maxReferenceImages, 0, 14, "reference image limit"),
+      maxReferenceImages: integer(config.maxReferenceImages, 0, IMAGE_MAX_REFERENCE_IMAGES, "reference image limit"),
       maxOutputs: choices([config.maxOutputs], IMAGE_OUTPUT_COUNTS, "image output count")[0]! };
   }
   if (value.video !== undefined) {

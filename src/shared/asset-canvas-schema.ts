@@ -1,6 +1,7 @@
 import {
   AGENT_REASONING_LEVELS,
   IMAGE_ASPECT_RATIOS,
+  IMAGE_MAX_REFERENCE_IMAGES,
   IMAGE_RESOLUTIONS,
   VIDEO_ASPECT_RATIOS,
   VIDEO_RESOLUTIONS,
@@ -74,7 +75,7 @@ const nodes = [
       model,
       resolution: { enum: IMAGE_RESOLUTIONS },
       aspectRatio: { enum: IMAGE_ASPECT_RATIOS },
-      images: { type: "array", maxItems: 14, items: reference },
+      images: { type: "array", maxItems: IMAGE_MAX_REFERENCE_IMAGES, items: reference },
       assetId: id,
     },
   }),

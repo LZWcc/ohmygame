@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { applyEdits, format, modify, parse, type JSONPath, type ParseError } from "jsonc-parser";
-import { CUSTOM_MODEL_APIS, type CustomProviderSettings, type CustomProviderDetails, type CustomProviderModel, type CustomThinkingLevelMap, type SaveCustomProviderRequest, type ModelRef, type ImageModel, type ProviderCapability, type Model3DDefinition } from "../shared/contracts.js";
+import { CUSTOM_MODEL_APIS, IMAGE_MAX_REFERENCE_IMAGES, type CustomProviderSettings, type CustomProviderDetails, type CustomProviderModel, type CustomThinkingLevelMap, type SaveCustomProviderRequest, type ModelRef, type ImageModel, type ProviderCapability, type Model3DDefinition } from "../shared/contracts.js";
 import { isNative3DProvider, MODEL_3D_PRESETS, model3DPreset, normalizeNativeModel3D, type Native3DProviderId } from "../shared/model3d-presets.js";
 import { modelUsageList, modelUsages, normalizeEndpoint, normalizeModelUsages } from "../shared/custom-models.js";
 import type { RuntimeModel } from "./agent.js";
@@ -174,7 +174,7 @@ export class ProviderModelSettingsStore {
         usages: { ...previous?.usages, image: { protocol: image.protocol,
           resolutions: [...new Set(image.generationOptions.map((option) => option.resolution))],
           aspectRatios: [...new Set(image.generationOptions.map((option) => option.aspectRatio))],
-          maxReferenceImages: image.supportsReferenceImage ? Math.min(14, image.maxReferenceImages ?? 1) : 0, maxOutputs: image.maxOutputs } } });
+          maxReferenceImages: image.supportsReferenceImage ? Math.min(IMAGE_MAX_REFERENCE_IMAGES, image.maxReferenceImages ?? 1) : 0, maxOutputs: image.maxOutputs } } });
     }
     await this.saveCustomProvider(id, { ...current, modelConfigurationVersion: 2, models: [...models.values()] }, apply, true);
   }

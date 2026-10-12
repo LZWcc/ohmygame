@@ -244,7 +244,7 @@ function ModelFields({ model, preset, onChange, disabled }: { model: CustomProvi
   const usages = modelUsages(model);
   return <fieldset className="project-settings-section" disabled={disabled}>
     <label><span>Model display name</span><input value={model.name} onChange={(event) => onChange({ ...model, name: event.target.value })} placeholder={model.id || "Same as model ID"} maxLength={200} /></label>
-    <CustomModelUsageFields usages={usages} preset={preset} onChange={(usages) => onChange({ ...model, usages })} />
+    <CustomModelUsageFields usages={usages} preset={preset} modelId={model.id} onChange={(usages) => onChange({ ...model, usages })} />
     {usages.language ? <details className="custom-provider-advanced"><summary>Language settings</summary><LanguageModelFields model={model} onChange={onChange} disabled={disabled} /></details> : null}
   </fieldset>;
 }
