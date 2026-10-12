@@ -190,6 +190,13 @@ export async function createPreviewProxy(
                   String(document),
                   message.type !== "close",
                 );
+                if (message.type === "source" && message.source) {
+                  context.source = message.source;
+                  for (const diagnostic of failures.values()) {
+                    if (diagnostic.client === context.client) diagnostic.source = message.source;
+                  }
+                  publish();
+                }
                 if (message.type === "diagnostic") {
                   if (message.diagnostic === null) clearDiagnostics(document);
                   else if (message.diagnostic)
@@ -548,7 +555,8 @@ function compilationMessage(body: string, pathname: string): string {
 }
 
 type BridgeMessage = {
-  type: "heartbeat" | "resume" | "navigation" | "close" | "diagnostic";
+  type: "heartbeat" | "resume" | "navigation" | "close" | "diagnostic" | "source";
+  source?: "editor" | "player";
   path?: string;
   diagnostic?: PreviewDiagnostic | null;
 };
@@ -566,17 +574,19 @@ async function receiveBridgeMessage(
   const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   if (
     !value ||
-    !["heartbeat", "resume", "navigation", "close", "diagnostic"].includes(
+    !["heartbeat", "resume", "navigation", "close", "diagnostic", "source"].includes(
       value.type,
     )
   )
     throw new Error("Invalid preview message");
+  if (value.type === "source" && value.source !== "editor" && value.source !== "player") throw new Error("Invalid preview source");
   const diagnostic =
     value.diagnostic === null ? null : previewDiagnostic(value.diagnostic);
   if (value.diagnostic !== undefined && diagnostic === undefined)
     throw new Error("Invalid preview diagnostic");
   return {
     type: value.type,
+    source: value.type === "source" ? value.source : undefined,
     path:
       typeof value.path === "string" ? value.path.slice(0, 2_000) : undefined,
     diagnostic,
@@ -632,6 +642,7 @@ const preserveContext = (url) => {
   }
   return next.href;
 };
+const replaceState = history.replaceState.bind(history);
 for (const method of ['pushState', 'replaceState']) {
   const original = history[method];
   history[method] = function(state, unused, url) {
@@ -641,6 +652,12 @@ for (const method of ['pushState', 'replaceState']) {
   };
 }
 history.replaceState(history.state, '', preserveContext(location.href));
+window.addEventListener('ohmygame:preview-source', (event) => {
+  if (!['editor', 'player'].includes(event.detail) || context.source === event.detail) return;
+  context.source = event.detail;
+  replaceState(history.state, '', preserveContext(location.href));
+  send({ type: 'source', source: context.source });
+});
 window.addEventListener('popstate', () => send({ type: 'navigation' }));
 window.addEventListener('hashchange', () => send({ type: 'navigation' }));
 window.addEventListener('pageshow', () => { void send({ type: 'resume' }).then(connectReload); });

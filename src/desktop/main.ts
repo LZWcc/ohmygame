@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, session, shell } from "electron";
 import { clipboardFilePaths, loadClipboardFiles } from "./file-clipboard.js";
 import { DaemonSupervisor } from "./daemon-supervisor.js";
@@ -21,7 +21,7 @@ import { RendererCloseRequest } from "./renderer-close.js";
 import { AsyncTaskPool } from "./async-task-pool.js";
 import { PROJECT_FILE_OPEN_MODES, type ProjectFileOpenMode } from "../shared/contracts.js";
 import type { PlaytestWatchState } from "../shared/playtest.js";
-import type { WebGamePlayerRequest } from "../shared/web-game-player.js";
+import type { WebGamePlayerRequest, WebGamePreviewLayout } from "../shared/web-game-player.js";
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(moduleDirectory, "../..");
@@ -53,7 +53,9 @@ const agentPlaytests = new ElectronPlaytestDriver((state) => {
 });
 const webGamePlayers = new WebGamePlayerWindows((state) => {
   mainWindow?.webContents.send("ohmygame:web-game-player-state", state);
-});
+}, useBuiltRenderer
+  ? pathToFileURL(path.join(moduleDirectory, "../renderer/web-game-host.html")).href
+  : new URL("web-game-host.html", `${developmentRendererUrl}/`).href);
 let quitting = false;
 let quitPending = false;
 let restartPending = false;
@@ -247,6 +249,25 @@ handle("ohmygame:web-game-player-state", (event, projectId: unknown) => {
   requirePlayerSource(event.sender, projectId);
   return webGamePlayers.state(projectId);
 });
+handle("ohmygame:attach-web-game-preview", (event, projectId: unknown, attachment: unknown, url: unknown, layout: unknown) => {
+  requirePlayerSource(event.sender, projectId);
+  if (!validRouteId(attachment) || typeof url !== "string" || url.length > 4_000) throw new Error("Invalid game preview target");
+  return webGamePlayers.attach(projectId, attachment, mainWindow!, url, requirePreviewLayout(layout), () => resolvePlayerTarget(projectId));
+});
+handle("ohmygame:layout-web-game-preview", (event, projectId: unknown, attachment: unknown, layout: unknown) => {
+  requirePlayerSource(event.sender, projectId);
+  if (!validRouteId(attachment)) throw new Error("Invalid game preview attachment");
+  webGamePlayers.layout(projectId, attachment, requirePreviewLayout(layout));
+});
+handle("ohmygame:detach-web-game-preview", (event, projectId: unknown, attachment: unknown) => {
+  requirePlayerSource(event.sender, projectId);
+  if (!validRouteId(attachment)) throw new Error("Invalid game preview attachment");
+  webGamePlayers.detach(projectId, attachment);
+});
+handle("ohmygame:capture-web-game-preview", (event, projectId: unknown) => {
+  requirePlayerSource(event.sender, projectId);
+  return webGamePlayers.capture(projectId);
+});
 handle("ohmygame:open-web-game-player", (event, projectId: unknown, request: unknown) => {
   requirePlayerSource(event.sender, projectId);
   const input = request as Partial<WebGamePlayerRequest> | null;
@@ -277,6 +298,16 @@ function requirePlayerSource(sender: Electron.WebContents, projectId: unknown): 
   if (!mainWindow || sender !== mainWindow.webContents || !validRouteId(projectId) || !daemon) {
     throw new Error("Invalid game player source");
   }
+}
+
+function requirePreviewLayout(value: unknown): WebGamePreviewLayout {
+  const layout = value as Partial<WebGamePreviewLayout> | null;
+  const bounds = layout?.bounds;
+  if (!bounds || typeof layout.visible !== "boolean" ||
+      ![bounds.x, bounds.y, bounds.width, bounds.height].every((entry) => Number.isFinite(entry) && entry >= 0 && entry <= 32_768)) {
+    throw new Error("Invalid game preview bounds");
+  }
+  return layout as WebGamePreviewLayout;
 }
 
 async function resolvePlayerTarget(projectId: string): Promise<WebGamePlayerTarget> {
@@ -468,6 +499,11 @@ async function openMainWindow(): Promise<void> {
     integratedMenuBar: true,
     beforeLoad: (window) => {
       mainWindow = window;
+      window.on("show", () => webGamePlayers.synchronize());
+      window.on("hide", () => webGamePlayers.synchronize());
+      window.on("minimize", () => webGamePlayers.synchronize());
+      window.on("restore", () => webGamePlayers.synchronize());
+      window.on("resize", () => webGamePlayers.synchronize());
       const close = new RendererCloseRequest(
         (id) => window.webContents.send("ohmygame:prepare-close", id),
         (id, error) => { if (!window.isDestroyed()) window.webContents.send("ohmygame:cancel-close", id, error); },

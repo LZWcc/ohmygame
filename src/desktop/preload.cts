@@ -3,7 +3,7 @@ import type { DesktopUpdateState } from "../shared/desktop-update.js";
 import type { ProjectFileOpenMode } from "../shared/contracts.js";
 import type { PlaytestWatchState } from "../shared/playtest.js";
 import type { DesktopClipboardFile } from "../shared/file-transfer.js";
-import type { WebGamePlayerRequest, WebGamePlayerState } from "../shared/web-game-player.js";
+import type { WebGamePlayerRequest, WebGamePlayerState, WebGamePreviewLayout } from "../shared/web-game-player.js";
 import type { DesktopRuntimeState } from "../shared/desktop-runtime.js";
 
 function argument(name: string): string {
@@ -73,6 +73,15 @@ if (process.isMainFrame) {
     openPlaytest: (projectId: string, viewport: { width: number; height: number }) =>
       ipcRenderer.invoke("ohmygame:open-playtest", projectId, viewport) as Promise<void>,
     webGamePlayer: Object.freeze({
+      preview: Object.freeze({
+        attach: (projectId: string, attachment: string, url: string, layout: WebGamePreviewLayout) =>
+          ipcRenderer.invoke("ohmygame:attach-web-game-preview", projectId, attachment, url, layout) as Promise<void>,
+        layout: (projectId: string, attachment: string, layout: WebGamePreviewLayout) =>
+          ipcRenderer.invoke("ohmygame:layout-web-game-preview", projectId, attachment, layout) as Promise<void>,
+        detach: (projectId: string, attachment: string) =>
+          ipcRenderer.invoke("ohmygame:detach-web-game-preview", projectId, attachment) as Promise<void>,
+        capture: (projectId: string) => ipcRenderer.invoke("ohmygame:capture-web-game-preview", projectId) as Promise<Uint8Array>,
+      }),
       open: (projectId: string, request: WebGamePlayerRequest) => ipcRenderer.invoke("ohmygame:open-web-game-player", projectId, request) as Promise<void>,
       state: (projectId: string) => ipcRenderer.invoke("ohmygame:web-game-player-state", projectId) as Promise<WebGamePlayerState>,
       close: (projectId: string) => ipcRenderer.invoke("ohmygame:close-web-game-player", projectId) as Promise<void>,

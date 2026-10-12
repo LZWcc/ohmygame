@@ -39,7 +39,8 @@
     "test:ablation": "bun scripts/test-ablation.mjs",
     "test:publish-contract": "bun --bun node_modules/vitest/vitest.mjs run test/publish.test.ts test/publish-client.test.ts",
     "typecheck": "bun --bun node_modules/typescript/bin/tsc --noEmit",
-    "test:node-runtime": "bun run build:daemon && node scripts/test-node-runtime.mjs"
+    "test:node-runtime": "bun run build:daemon && node scripts/test-node-runtime.mjs",
+    "test:desktop-game": "bun run build:host && bun run build:renderer && node scripts/test-web-game-runtime.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.99.2",

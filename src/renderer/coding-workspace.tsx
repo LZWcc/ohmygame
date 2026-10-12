@@ -53,6 +53,7 @@ import { WorkspaceTabs, type WorkspaceTabOption } from "./workspace-tabs.js";
 import { useWebGamePlayer } from "./use-web-game-player.js";
 import { ErrorBoundary } from "./error-boundary.js";
 import { useRuntimeConnection } from "./runtime-connection.js";
+import { DesktopGamePreview } from "./desktop-game-preview.js";
 
 type WorkspaceTab = "preview" | "code" | "assets";
 const CanvasWorkspace = lazy(() => import("./canvas-workspace.js").then((module) => ({ default: module.CanvasWorkspace })));
@@ -148,17 +149,19 @@ export function CodingWorkspace({
   const fileRequest = useRef(0);
   const preview = project?.preview;
   const previewBaseUrl = preview?.status === "ready" ? preview.url : undefined;
-  const previewPageUrl = previewBaseUrl ? isolatedPreviewUrl(new URL(previewPath, previewBaseUrl).toString(), "editor", previewClient) : undefined;
-  const currentPreviewUrl = previewBaseUrl ? isolatedPreviewUrl(new URL(actualPreviewPath, previewBaseUrl).toString(), "editor", previewClient) : undefined;
   const player = useWebGamePlayer(supportsPreview ? project?.id : undefined, previewBaseUrl, preview?.revision, preview?.pages?.find((page) => page.source === "player")?.path);
+  const nativePreview = typeof window !== "undefined" && window.ohMyGameDesktop?.webGamePlayer?.preview;
+  const gameClient = nativePreview ? player.client ?? previewClient : previewClient;
+  const previewPageUrl = previewBaseUrl ? isolatedPreviewUrl(new URL(previewPath, previewBaseUrl).toString(), "editor", gameClient) : undefined;
+  const currentPreviewUrl = previewBaseUrl ? isolatedPreviewUrl(new URL(actualPreviewPath, previewBaseUrl).toString(), "editor", gameClient) : undefined;
   const previewStage = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const page = preview?.pages?.find((page) => player.open ? page.source === "player" : page.client === previewClient);
+    const page = preview?.pages?.find((page) => nativePreview ? page.client === gameClient : player.open ? page.source === "player" : page.client === previewClient);
     if (!page) return;
     setActualPreviewPath(page.path);
     setKnownPaths((current) => current.includes(page.path) ? current : [...current, page.path]);
-  }, [preview?.pages, previewClient, player.open]);
+  }, [preview?.pages, gameClient, previewClient, player.open, nativePreview]);
 
   useEffect(() => {
     setPreviewPath(project?.previewPath ?? "/");
@@ -170,7 +173,7 @@ export function CodingWorkspace({
   }, [preview?.status]);
   const previousPlayerOpen = useRef(false);
   useEffect(() => {
-    if (previousPlayerOpen.current && !player.open) {
+    if (!nativePreview && previousPlayerOpen.current && !player.open) {
       const page = preview?.pages?.find((page) => page.source === "player");
       if (page) { setPreviewPath(page.path); setActualPreviewPath(page.path); }
     }
@@ -267,6 +270,7 @@ export function CodingWorkspace({
   function refreshPreview(): void {
     if (preview?.status === "ready") {
       if (player.open) void player.reload();
+      else if (nativePreview) setReload((value) => value + 1);
       else { setPreviewPath(actualPreviewPath); setReload((value) => value + 1); }
     } else if (preview?.status === "error" || preview?.status === "stopped") {
       onRestart();
@@ -403,7 +407,7 @@ export function CodingWorkspace({
         >
           <ErrorBoundary label="Preview" resetKey={previewPageUrl}>
           <PreviewView
-            project={project} client={previewClient} onAskAgent={onAskAgent} onLogs={() => setLogsOpen(true)} onOpenFile={(path) => { setSelectedCodePath(path); setSelectedTab("code"); void selectFile(path); }} reload={reload} revision={workspaceRevision} url={previewPageUrl} viewport={viewport}
+            project={project} client={gameClient} onAskAgent={onAskAgent} onLogs={() => setLogsOpen(true)} onOpenFile={(path) => { setSelectedCodePath(path); setSelectedTab("code"); void selectFile(path); }} reload={reload} revision={workspaceRevision} url={previewPageUrl} viewport={viewport}
             pausedAfterRecovery={previewPaused}
             active={shownTab === "preview"} playerOpen={player.open} suspended={player.suspended} pending={player.pending || player.checking}
             error={player.error} onPlay={playGame} stageRef={previewStage}
@@ -754,12 +758,13 @@ export function PreviewView({ project, client, onAskAgent, onOpenFile, onLogs, r
 }) {
   const runtime = useRuntimeConnection();
   const preview = project?.preview;
-  const frame = useRef<HTMLIFrameElement>(null);
+  const frame = useRef<HTMLElement | null>(null);
+  const native = typeof window !== "undefined" ? window.ohMyGameDesktop?.webGamePlayer?.preview : undefined;
   const captureTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [started, setStarted] = useState(active && !suspended);
   const [cover, setCover] = useState<string>();
   const diagnostic = preview?.diagnostics?.length
-    ? preview.diagnostics.find((item) => playerOpen ? item.source === "player" : item.client === client)
+    ? preview.diagnostics.find((item) => native ? item.client === client : playerOpen ? item.source === "player" : item.client === client)
     : preview?.diagnostic;
   const captureBlocked = useRef(false);
   captureBlocked.current = !!diagnostic || runtime.status !== "ready";
@@ -769,7 +774,7 @@ export function PreviewView({ project, client, onAskAgent, onOpenFile, onLogs, r
   }, [diagnostic, runtime.status]);
 
   useEffect(() => {
-    if (suspended) { setStarted(false); clearTimeout(captureTimer.current); }
+    if (suspended) { if (!native) setStarted(false); clearTimeout(captureTimer.current); }
     else if (active) setStarted(true);
   }, [suspended, active]);
 
@@ -791,17 +796,32 @@ export function PreviewView({ project, client, onAskAgent, onOpenFile, onLogs, r
     if (revision > 0 && frame.current) scheduleCoverCapture(frame.current);
   }, [revision]);
 
-  function scheduleCoverCapture(frame: HTMLIFrameElement): void {
+  function scheduleCoverCapture(element: HTMLElement): void {
+    frame.current = element;
     clearTimeout(captureTimer.current);
     if (!project || !window.ohMyGameDesktop?.capturePage) return;
     captureTimer.current = setTimeout(() => {
       if (captureBlocked.current) return;
-      void captureProjectCover(project.id, frame).catch(() => {});
+      void captureProjectCover(project.id, element, native ? () => native.capture(project.id) : undefined).catch(() => {});
     }, 1_000);
   }
 
+  const showFrame = (active || started || (native && playerOpen)) && (native || !suspended) && preview?.status === "ready" && url;
   return (
     <div ref={stageRef} className={`viewer-stage viewer-stage-${viewport}`}>
+      {showFrame ? <div className="preview-frame-wrap" hidden={suspended}>
+        {native && project ? <DesktopGamePreview
+          bridge={native} refresh={window.ohMyGameDesktop!.webGamePlayer!.refresh} projectId={project.id} url={url!} reload={reload}
+          visible={active && !suspended && !diagnostic && !error && runtime.status === "ready"}
+          onReady={scheduleCoverCapture}
+        /> : <iframe
+          ref={(element) => { frame.current = element; }}
+          key={`${url}:${reload}`} className="preview-frame" src={url}
+          title={`${project?.name ?? "Project"} preview`}
+          sandbox="allow-forms allow-modals allow-pointer-lock allow-same-origin allow-scripts"
+          onLoad={(event) => scheduleCoverCapture(event.currentTarget)}
+        />}
+      </div> : null}
       {suspended ? <div className="preview-player-state">
         {cover ? <img className="preview-player-cover" src={cover} alt="" /> : null}
         <div className="preview-empty-state">
@@ -810,19 +830,7 @@ export function PreviewView({ project, client, onAskAgent, onOpenFile, onLogs, r
           <p className="preview-empty-description">Close the game window to return to the preview.</p>
           {playerOpen && onPlay ? <button type="button" className="preview-return-button" disabled={pending} onClick={onPlay}>Return to game</button> : null}
         </div>
-      </div> : (active || started) && preview?.status === "ready" && url ? (
-        <div className="preview-frame-wrap">
-          <iframe
-            ref={frame}
-            key={`${url}:${reload}`}
-            className="preview-frame"
-            src={url}
-            title={`${project?.name ?? "Project"} preview`}
-            sandbox="allow-forms allow-modals allow-pointer-lock allow-same-origin allow-scripts"
-            onLoad={(event) => scheduleCoverCapture(event.currentTarget)}
-          />
-        </div>
-      ) : <div className="preview-status-panel">
+      </div> : !showFrame ? <div className="preview-status-panel">
         <PreviewState status={preview?.status} error={preview?.error} phase={preview?.phase} startedAt={preview?.startedAt} />
         {(pausedAfterRecovery || preview?.stopReason === "recovery") && preview?.status === "stopped" ? <p>Preview is paused after service recovery.</p> : null}
         {preview?.status === "stopped" && preview.stopReason === "manual" ? <p>Preview was stopped. Start it when you are ready.</p> : preview?.status === "stopped" && preview.stopReason === "idle" ? <p>Preview stopped because it was not in use.</p> : preview?.status === "stopped" && project?.previewAutoStart === false ? <p>Automatic preview is disabled.</p> : null}
@@ -832,7 +840,7 @@ export function PreviewView({ project, client, onAskAgent, onOpenFile, onLogs, r
           {onLogs ? <button type="button" onClick={onLogs}>View logs</button> : null}
           {preview?.error && onAskAgent ? <button type="button" onClick={() => onAskAgent(previewRepairPrompt(project, preview.error!))}>Ask Agent to fix</button> : null}
         </div> : null}
-      </div>}
+      </div> : null}
       {diagnostic ? <div className="preview-diagnostic" role="alert">
         <strong>{diagnostic.kind === "compile" ? "Preview compilation failed" : diagnostic.kind === "runtime" ? "Preview runtime error" : "Preview could not load"}</strong>
         <details><summary>Error details</summary><pre>{diagnostic.message}</pre></details>
@@ -849,11 +857,11 @@ export function PreviewView({ project, client, onAskAgent, onOpenFile, onLogs, r
   );
 }
 
-async function captureProjectCover(projectId: string, frame: HTMLIFrameElement): Promise<void> {
+async function captureProjectCover(projectId: string, frame: HTMLElement, capture?: () => Promise<Uint8Array>): Promise<void> {
   if ((await getProjectCoverState(projectId)).mode === "custom") return;
   // A publish dialog can cover the preview in the desktop window's screenshot.
   if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
-  const cover = await captureElementImage(frame, 800);
+  const cover = await captureElementImage(frame, 800, undefined, capture);
   if (cover) await setProjectCover(projectId, cover, "auto");
 }
 
