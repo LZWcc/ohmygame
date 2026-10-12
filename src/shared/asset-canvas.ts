@@ -12,7 +12,7 @@ import {
   DEFAULT_VIDEO_NODE_CONFIG,
 } from "./generation-config.js";
 import { Check } from "typebox/value";
-import { canvasNodeContent, canvasNodeLayout } from "./canvas-node-layout.js";
+import { canvasNodeContent, canvasNodeLayout, isResizableCanvasNodeType, RESIZABLE_CANVAS_NODE_SIZES } from "./canvas-node-layout.js";
 import { ASSET_CANVAS_EDITOR_LAYOUT_SCHEMA, ASSET_CANVAS_SCHEMA } from "./asset-canvas-schema.js";
 
 export type AssetCanvasStarter = "image" | "video" | "model-3d";
@@ -92,6 +92,12 @@ export function validateAssetCanvasDocument(document: AssetCanvasDocument): void
   const layoutIds = Object.keys(document.editorLayout.nodes);
   if (layoutIds.length !== nodeIds.size || layoutIds.some((id) => !nodeIds.has(id))) {
     throw new Error("Editor layout Node IDs must exactly match board Nodes");
+  }
+  for (const node of document.nodes) {
+    const layout = document.editorLayout.nodes[node.id]!;
+    if (!isResizableCanvasNodeType(node.type) && [node.width, node.height, layout.width, layout.height].some((value) => value !== undefined)) {
+      throw new Error(`Node ${node.id}: ${node.type} nodes size to their content; remove width/height from its editor layout (only ${Object.keys(RESIZABLE_CANVAS_NODE_SIZES).join(", ")} nodes are resizable)`);
+    }
   }
   const edgeIds = new Set<string>();
   for (const edge of document.edges) {

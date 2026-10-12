@@ -8,7 +8,7 @@ import { convertToPng } from "@earendil-works/pi-coding-agent";
 import type { AssetCanvasNode, PromptImage, RunToolRequest, ToolJob, ToolId } from "../shared/contracts.js";
 import { createCanvasBoard, fitCanvasLayout, isCanvasBoard, isCanvasIndex, CANVAS_INDEX_SCHEMA, CANVAS_BOARD_SCHEMA, CANVAS_LAYOUT_SCHEMA, type CanvasBoard, type CanvasBoardDetail, type CanvasWorkspaceDetail, type CanvasWorkspaceIndex } from "../shared/canvas-workspace.js";
 import { CANVAS_ASSETS_SCHEMA, canvasNodeAssetIds } from "../shared/canvas-assets.js";
-import { combineAssetCanvasPrompt, createAssetCanvasDocument, resolveAssetCanvasAssetId } from "../shared/asset-canvas.js";
+import { combineAssetCanvasPrompt, createAssetCanvasDocument, resolveAssetCanvasAssetId, validateAssetCanvasDocument } from "../shared/asset-canvas.js";
 import { buildModel3DToolRequest } from "../shared/generation-config.js";
 import { getWorkspaceMedia } from "./workspace.js";
 import { createCanvasDocument, canvasDocumentPath, type CanvasDocumentDetail, type CanvasMarkdownDocument } from "../shared/canvas-document.js";
@@ -38,7 +38,7 @@ Canvas files are the source of truth in both Design and Asset Canvas. Use normal
 - boards/<id>.json contains nodes and their content. Every node may have a title and a description of its purpose. Document bodies live in documents/<id>.md, referenced by documentId. Table data lives in tables/<id>.json, referenced by tableId; register tables in index.json. Keep row/column IDs stable and match cells to their column types.
 - Give nodes meaningful titles. Descriptions explain their intended role; do not describe unseen image pixels as verified facts.
 - For game work, identify reference mockups and production assets in node titles/descriptions. Record production assets' intended gameplay use in the design document; reference mockups do not fulfill those requirements.
-- editor/<board-id>.json stores positions, optional node width/height, and zoom. fitView requests a one-time fit when a remixed board is first opened; the editor clears it after saving the new viewport. New nodes are placed automatically; layout edits are only needed when the user asks to arrange the canvas.
+- editor/<board-id>.json stores positions, zoom, and width/height for text, document, and table nodes only; media and generation nodes size to their content. fitView requests a one-time fit when a remixed board is first opened; the editor clears it after saving the new viewport. New nodes are placed automatically; layout edits are only needed when the user asks to arrange the canvas.
 - assets.json maps asset IDs to names, workspace-relative paths, optional descriptions and generation prompts. Use the same ID for the same asset across boards. References with type "library" resolve through this manifest. libraryAssetId records provenance; local files remain usable without the Library.
 - Read actual image files with read when judging their appearance. A name, description, or generation prompt is not proof of what the image shows.
 - promptSource references a text or document node. Text and document nodes accept references to text, document, image, or image asset nodes as AI source material. images, references, and source declare dependencies; their canvas lines are derived. Do not duplicate these relationships in edges.
@@ -58,7 +58,7 @@ The canvas edits ordinary project files. Documents are Markdown and media files 
 | documents/<id>.md | Canonical document body |
 | tables/<id>.json | Typed columns and rows with stable IDs; cells keyed by column ID |
 | assets.json | Asset IDs, names, project-relative file paths, descriptions and generation prompts |
-| editor/<id>.json | Positions, optional node dimensions and canvas viewport; missing node positions are filled automatically |
+| editor/<id>.json | Positions, text/document/table node dimensions and canvas viewport; missing node positions are filled automatically |
 | schemas/ | Exact persisted file contracts |
 | jobs.json | Generation history managed by the application |
 
@@ -162,6 +162,8 @@ export async function readCanvasBoard(workspace: string, id: string): Promise<Ca
   const layout = layoutText === undefined ? createAssetCanvasDocument().editorLayout : parseCanvasJson<CanvasBoard["editorLayout"]>(layoutText, layoutName, CANVAS_LAYOUT_SCHEMA);
   const editorLayout = fitCanvasLayout(raw.nodes, layout);
   const board = { ...raw, editorLayout, nodes: raw.nodes.map((node) => applyCanvasNodeLayout(node, editorLayout.nodes[node.id]!)) };
+  try { validateAssetCanvasDocument(board); }
+  catch (cause) { throw new CanvasError(`canvas/${name}: ${cause instanceof Error ? cause.message : String(cause)}`); }
   if (!isCanvasBoard(board) || board.id !== id) throw new CanvasError(`canvas/${name}: invalid node IDs or references`);
   return { board, revision: revision([text, layoutText ?? ""]) };
 }

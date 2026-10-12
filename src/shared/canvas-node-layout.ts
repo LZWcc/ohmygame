@@ -1,4 +1,15 @@
-import type { AssetCanvasNode, AssetCanvasNodeLayout } from "./contracts.js";
+import type { AssetCanvasNode, AssetCanvasNodeLayout, AssetCanvasNodeType } from "./contracts.js";
+
+/** Default sizes of the only node types whose size the user controls; other nodes size to their content. */
+export const RESIZABLE_CANVAS_NODE_SIZES = {
+  text: { width: 300, height: 190 },
+  document: { width: 360, height: 330 },
+  table: { width: 640, height: 360 },
+} as const;
+
+export function isResizableCanvasNodeType(type: AssetCanvasNodeType): type is keyof typeof RESIZABLE_CANVAS_NODE_SIZES {
+  return Object.hasOwn(RESIZABLE_CANVAS_NODE_SIZES, type);
+}
 
 export function canvasNodeLayout(
   node: Pick<AssetCanvasNode, "position" | "width" | "height">,

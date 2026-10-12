@@ -34,7 +34,9 @@ nodes' saved text, Markdown and actual image output from the workspace. Image
 references require a language model that accepts images. A node cannot reference
 itself or, for Document nodes, another node pointing to the same document.
 
-Positions, optional node width/height and zoom live in `editor/`. New nodes get positions automatically.
+Positions, zoom and the width/height of text, document and table nodes live in
+`editor/`. Media and generation nodes size to their content, so a width/height
+on them fails validation. New nodes get positions automatically.
 The agent usually edits only the semantic files. Deleting a board or node
 keeps its documents, tables and media.
 
