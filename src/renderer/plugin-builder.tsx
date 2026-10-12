@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentReasoningLevel } from "../shared/contracts.js";
 import type { PluginDraft, PluginSetupState, PluginSetupSummary } from "../shared/plugin-setup.js";
 import type { PluginDetail } from "../shared/plugins.js";
 import { pluginComponentKey } from "../shared/plugins.js";
@@ -8,20 +7,22 @@ import { clampReasoningLevel } from "../shared/reasoning.js";
 import { abortPluginSetup, installPluginDraft, listPluginSetups, promptPluginSetup, readPluginDraft,
   readPluginDraftFile, readPluginSetup, readPlugin, readPluginSkill, testPluginDraft, updatePluginSettings, waitForRuntime } from "./api.js";
 import { AgentTimeline } from "./agent-timeline.js";
-import { ModelSelector, useAgentModels } from "./model-selector.js";
+import { useAgentModels } from "./model-selector.js";
 import { PromptBox } from "./prompt-box.js";
 import { PluginConfigurationPanel, PluginMcpPanel } from "./plugin-controls.js";
+import { WorkspaceFileBrowser } from "./coding-workspace.js";
 import { HighlightedCode } from "./highlighted-code.js";
 import { MarkdownContent } from "./markdown-content.js";
 import { WorkspaceTabs, type WorkspaceTabOption } from "./workspace-tabs.js";
-import { WindowDragRegion } from "./window-drag-region.js";
+import { WorkspaceShell, WorkspaceAgentPane, WorkspaceBackButton } from "./workspace-shell.js";
+import { ComposerActions } from "./composer-actions.js";
 import { readChatLayout } from "./chat-layout.js";
 import { pluginBuilderHash, pluginHash, settingsHash } from "./routes.js";
 import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { readPluginBuilderInput, savePluginBuilderInput } from "./plugin-builder-drafts.js";
 import { openPluginBuilder } from "./plugin-builder-navigation.js";
-import { ArrowLeft, Check, ChevronRight, FileCode2, FileText, Folder, LoaderCircle, Package, Plus,
-  Plug, RefreshCw, SendArrow, Settings, Square, WandSparkles } from "./icons.js";
+import { ArrowLeft, Check, ChevronRight, FileCode2, FileText, Folder, LoaderCircle, Package, MessageSquarePlus, PanelToggle,
+  Plug, RefreshCw, Settings, WandSparkles } from "./icons.js";
 import "./plugin-builder.css";
 
 export function PluginBuilderSessions() {
@@ -47,7 +48,7 @@ export function PluginBuilderSessions() {
 type BuilderView = "overview" | "files" | "configuration" | "checks";
 const TABS: WorkspaceTabOption<BuilderView>[] = [
   { id: "overview", label: "Overview", icon: Package }, { id: "files", label: "Files", icon: FileCode2 },
-  { id: "configuration", label: "Configuration", icon: Settings }, { id: "checks", label: "Checks", icon: Check },
+  { id: "configuration", label: "Setup", icon: Settings }, { id: "checks", label: "Checks", icon: Check },
 ];
 const STARTERS = [
   { icon: WandSparkles, title: "Create a workflow", description: "Turn a repeatable task into a Skill.", prompt: "Create a Skill that reviews a game design document and produces a prioritized list of improvements. Include clear inputs, steps, output format, and an example request." },
@@ -68,6 +69,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   const [retry, setRetry] = useState(0);
   const [fileRequest, updateFileRequest] = useState<{ path: string; id: number }>();
   const [chatLayout] = useState(readChatLayout);
+  const [agentCollapsed, setAgentCollapsed] = useState(false);
   const textarea = useRef<HTMLTextAreaElement>(null);
   const timeline = useRef<HTMLDivElement>(null);
   const following = useRef(true);
@@ -139,68 +141,79 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
     });
   }
   function prefill(prompt: string) {
+    setAgentCollapsed(false);
     setInput(current => ({ ...current, prompt: current.prompt.trim() ? `${current.prompt.trimEnd()}\n\n${prompt}` : prompt }));
-    textarea.current?.focus();
+    requestAnimationFrame(() => textarea.current?.focus());
   }
 
-  return <main className={`plugin-builder-shell is-chat-${chatLayout}`}>
-    <WindowDragRegion />
-    <header className="plugin-builder-header">
-      <a className="plugin-builder-back" href={settingsHash("plugins")}><ArrowLeft size={16} />Plugins</a>
-      <span className="plugin-builder-header-divider" />
-      <div className="plugin-builder-heading"><strong>{state?.title ?? "Plugin Builder"}</strong><small>{state ? statusLabel(state.status) : "Loading workspace…"}</small></div>
-      <div className="plugin-builder-header-actions">
-        <button className="plugin-detail-secondary" type="button" disabled={disabled} onClick={() => void action("creating", () => openPluginBuilder())}><Plus size={14} />New plugin</button>
-        {state?.pluginId ? <a className="plugin-detail-secondary" href={pluginHash(state.pluginId)}>Open plugin<ChevronRight size={14} /></a> : null}
-        {draftPlugin ? <button className="plugin-detail-primary" type="button" disabled={disabled || Boolean(draft?.errors.length) || upToDate} onClick={() => void action("installing", async () => {
-          if (!draft?.revision) return;
-          setState(await installPluginDraft(sessionId, draft.revision)); await refresh();
-        })}>{operation === "installing" ? <LoaderCircle className="spin" size={14} /> : upToDate ? <Check size={14} /> : <Package size={14} />}{upToDate ? "Installed" : state?.pluginId ? "Update plugin" : "Install plugin"}</button> : null}
-      </div>
-    </header>
-    <div className="plugin-builder-body">
-      <section className="plugin-builder-chat" aria-label="Plugin assistant">
-        <div className="plugin-builder-chat-heading"><WandSparkles size={15} /><span>Build with AI</span>{state?.busy ? <span role="status"><LoaderCircle className="spin" size={12} />Working</span> : null}</div>
-        <div className="plugin-builder-timeline" ref={timeline} onScroll={() => {
-          const element = timeline.current;
-          if (element) following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-        }}>
-          {!state && !error ? <div className="plugin-builder-empty"><LoaderCircle className="spin" size={22} /><p>Opening your workspace…</p></div> : null}
+  const goToPlugins = () => { window.location.hash = settingsHash("plugins"); };
+  return <WorkspaceShell className="plugin-builder-shell" chatLayout={chatLayout} agentCollapsed={agentCollapsed}
+    onHome={goToPlugins} homeLabel="Back to plugins" homeIcon={ArrowLeft} onExpandAgent={() => setAgentCollapsed(false)}
+    agent={<WorkspaceAgentPane label="Plugin assistant" title={<span className="viewer-title" title={state?.title}>{state?.title ?? "Plugin Builder"}</span>}
+      actions={<>
+        <button className="icon-button pane-header-action" type="button" disabled={disabled} title="New plugin" aria-label="New plugin"
+          onClick={() => void action("creating", () => openPluginBuilder())}>
+          {operation === "creating" ? <LoaderCircle className="spin" size={14} /> : <MessageSquarePlus size={14} />}
+        </button>
+        <button className="icon-button pane-header-action" type="button" onClick={() => setAgentCollapsed(true)} title="Hide agent" aria-label="Hide agent"><PanelToggle size={14} /></button>
+      </>}
+      bodyRef={timeline} onScroll={event => {
+        const element = event.currentTarget;
+        following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+      }}>
+        <div className="timeline" aria-live="polite">
+          {!state && !error ? <p className="plugin-builder-working" role="status"><LoaderCircle className="spin" size={13} />Opening your workspace…</p> : null}
           {state && !state.turns.length ? <div className="plugin-builder-intro">
-            <div className="plugin-builder-icon"><WandSparkles size={24} /></div>
-            <h1>{state.pluginId ? "Improve your plugin" : "Make a capability your own"}</h1>
-            <p>{state.pluginId ? "Describe what you want to configure or repair. Your plugin stays available as you work." : "Describe a workflow or service. Build a reusable plugin, review what it does, and add it to your studio."}</p>
-            {!state.pluginId ? <div className="plugin-builder-starters">{STARTERS.map(({ icon: Icon, ...starter }) => <button type="button" key={starter.title} disabled={disabled} onClick={() => prefill(starter.prompt)}>
-              <Icon size={18} /><span><strong>{starter.title}</strong><small>{starter.description}</small></span><ChevronRight size={14} />
+            <h1>{state.pluginId ? "Improve your plugin" : "What should your plugin do?"}</h1>
+            <p>{state.pluginId ? "Describe what you want to configure or repair." : "Describe a workflow or connect an existing service. Review the draft in the workspace as you build."}</p>
+            {!state.pluginId ? <div className="plugin-builder-starters">{STARTERS.map(({ icon: Icon, ...starter }) => <button type="button" key={starter.title} title={starter.description} disabled={disabled} onClick={() => prefill(starter.prompt)}>
+              <Icon size={14} /><span>{starter.title}</span><ChevronRight size={12} />
             </button>)}</div> : null}
           </div> : null}
           {state ? <AgentTimeline turns={state.turns} onAddToChat={prefill} onOpenWorkspaceFile={file => { setView("files"); setFileRequest(file); }} /> : null}
           {state?.busy && !state.turns.some(turn => turn.items.some(item => item.type === "agentMessage" && item.status === "inProgress")) ? <p className="plugin-builder-working" role="status"><LoaderCircle className="spin" size={13} />{activityLabel(state.activity)}</p> : null}
           {state?.status === "interrupted" ? <p className="plugin-builder-notice" role="status">This run was interrupted. Your conversation and files are saved; send a message to continue.</p> : null}
         </div>
-        <div className="plugin-builder-composer">
+        <div className="composer">
           {error || state?.error ? <p className="plugin-builder-error" role="alert">{error ?? state?.error}{!state ? <button type="button" onClick={() => setRetry(value => value + 1)}>Retry</button> : null}</p> : null}
           {catalog.status === "ready" && !catalog.models.length ? <p className="plugin-builder-notice">Connect a language model to start building. <a href={settingsHash("providers")}>Configure a provider</a></p> : null}
           <PromptBox value={input.prompt} onChange={prompt => setInput(current => ({ ...current, prompt }))} onSubmit={() => void send()}
             textareaRef={textarea} variant="project" disabled={!state} placeholder="Describe what your plugin should do…"
-            actions={<><ModelSelector models={catalog.models} status={catalog.status} value={model} reasoningLevel={reasoning} disabled={disabled}
+            actions={<ComposerActions models={catalog.models} status={catalog.status} value={model} reasoningLevel={reasoning} disabled={disabled}
               onChange={(selected, level) => setInput(current => ({ ...current, model: { provider: selected.provider, id: selected.id }, reasoningLevel: level }))}
-              onReasoningChange={(level: AgentReasoningLevel) => setInput(current => ({ ...current, reasoningLevel: level }))} />
-              {state?.busy ? <button className="icon-button stop-button" type="button" aria-label="Stop assistant" onClick={() => {
-                void abortPluginSetup(sessionId).catch(cause => setError(message(cause)));
-              }}><Square size={14} /></button> : <button className="icon-button send-button" type="submit" aria-label="Send plugin request" disabled={!state || !model || !input.prompt.trim() || disabled}><SendArrow size={16} /></button>}
-            </>} />
-          <small className="plugin-builder-input-note">{input.prompt ? "Draft saved on this device" : "Skills and existing MCP services · Credentials go in Configuration"}</small>
+              onReasoningChange={level => setInput(current => ({ ...current, reasoningLevel: level }))}
+              showStop={Boolean(state?.busy)} sendLabel="Send plugin request" stopLabel="Stop assistant"
+              sendDisabled={!state || !model || !input.prompt.trim() || disabled}
+              onStop={() => { void abortPluginSetup(sessionId).catch(cause => setError(message(cause))); }}
+            />} />
         </div>
-      </section>
-      <section className="plugin-builder-preview" aria-label="Plugin preview">
-        <div className="plugin-builder-preview-heading"><WorkspaceTabs tabs={TABS} active={view} onChange={setView} label="Plugin views" /><button type="button" className="plugin-builder-icon-button" aria-label="Refresh plugin preview" disabled={disabled} onClick={() => void action("refreshing", refresh)}><RefreshCw size={14} /></button></div>
+    </WorkspaceAgentPane>}
+  >
+      <section className="viewer-pane plugin-builder-preview" aria-label="Plugin preview" data-active-tab={view === "files" ? "code" : view}>
+        <header className="pane-header viewer-header window-drag-handle">
+          <span className="workspace-navigation-drag-exclusion" aria-hidden="true" />
+          <div className={`viewer-navigation${chatLayout === "right" ? " is-chat-right" : ""}`}>
+            {chatLayout === "right" ? <>
+              <WorkspaceBackButton onClick={goToPlugins} label="Back to plugins" icon={ArrowLeft} />
+              {agentCollapsed ? <button className="icon-button pane-header-action" type="button" title="Show agent" aria-label="Show agent" onClick={() => setAgentCollapsed(false)}><PanelToggle size={14} /></button> : null}
+            </> : null}
+            <WorkspaceTabs tabs={TABS} active={view} onChange={setView} label="Plugin views" />
+          </div>
+          <div className="viewer-controls-slot plugin-builder-status" title={state ? `${state.title} · ${statusLabel(state.status)}` : "Loading workspace…"}>
+            <span>{state?.title ?? "Plugin Builder"}</span><small role="status">{state ? statusLabel(state.status) : "Loading…"}</small>
+          </div>
+          <div className="viewer-publish">
+            <button className="icon-button pane-header-action" aria-label="Refresh plugin preview" title="Refresh plugin preview" type="button" disabled={disabled} onClick={() => void action("refreshing", refresh)}><RefreshCw size={14} /></button>
+            {state?.pluginId ? <button className="icon-button pane-header-action" type="button" title="Open plugin" aria-label="Open plugin" onClick={() => { window.location.hash = pluginHash(state.pluginId!); }}><ChevronRight size={14} /></button> : null}
+            {draftPlugin ? <button className="publish-button workspace-publish-button" type="button" disabled={disabled || Boolean(draft?.errors.length) || upToDate} onClick={() => void action("installing", async () => {
+              if (!draft?.revision) return;
+              setState(await installPluginDraft(sessionId, draft.revision)); await refresh();
+            })}>{operation === "installing" ? <LoaderCircle className="spin" size={14} /> : upToDate ? <Check size={14} /> : <Package size={14} />}<span>{upToDate ? "Installed" : state?.pluginId ? "Update plugin" : "Install plugin"}</span></button> : null}
+          </div>
+        </header>
         <div className={`plugin-builder-preview-content is-${view}`}>
           {view === "overview" && draft?.errors.length ? <p className="plugin-builder-error" role="alert">The draft needs changes: {draft.errors.join(" ")}</p> : null}
-          {view === "overview" ? plugin ? <PluginOverview plugin={plugin} installed={upToDate || Boolean(installed && !draftPlugin)} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} onTry={prefill} /> : <div className="plugin-builder-preview-empty">
-            <div className="plugin-builder-icon"><Package size={28} /></div><h2>Your plugin takes shape here</h2><p>Review its skills, connected tools, and configuration as you build.</p>
-            <ol><li><span>1</span>Describe a workflow or service</li><li><span>2</span>Review the draft and run checks</li><li><span>3</span>Install it and try it in a project</li></ol>
-          </div> : null}
+          {view === "overview" ? plugin ? <PluginOverview plugin={plugin} installed={upToDate || Boolean(installed && !draftPlugin)} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} onTry={prefill} /> : <EmptyView icon={Package} title="Plugin preview" text="Your plugin's skills, tools, and setup appear here when a draft is ready." /> : null}
           {view === "files" ? <PluginFiles sessionId={sessionId} draft={draft} installed={installed} request={fileRequest} /> : null}
           {view === "configuration" ? plugin ? <>
             <div className="plugin-builder-section-title"><h2>Configuration</h2><p>Enter service credentials here. They are stored separately from the plugin and conversation.</p></div>
@@ -224,8 +237,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
           })} /> : null}
         </div>
       </section>
-    </div>
-  </main>;
+  </WorkspaceShell>;
   // File selections from the chat share the same preview as the file browser.
   function setFileRequest(file: string) { updateFileRequest({ path: file, id: Date.now() }); }
 }
@@ -265,12 +277,13 @@ function PluginFiles({ sessionId, draft, installed, request }: { sessionId: stri
     return () => { current = false; };
   }, [sessionId, active, draft?.revision, installed?.id]);
   if (!files.length) return <EmptyView icon={Folder} title="No draft files yet" text="The plugin's manifest, Skills, and supporting files appear here after the agent prepares a draft." />;
-  return <div className="plugin-builder-files">
-    <nav aria-label="Plugin files">{files.map(file => <button type="button" key={file.path} aria-current={file.path === active ? "page" : undefined} onClick={() => setSelected(file.path)}><FileText size={13} /><span>{file.path}</span></button>)}</nav>
-    <div className="plugin-builder-file-view"><div className="plugin-builder-file-heading"><strong>{active}</strong>{active?.endsWith(".md") ? <button type="button" onClick={() => setSource(value => !value)}>{source ? "Read document" : "View source"}</button> : null}</div>
-      {error ? <p role="alert" className="plugin-builder-notice">{error}</p> : file ? file.path.endsWith(".md") && !source ? <div className="plugin-builder-file-markdown"><MarkdownContent text={file.content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")} /></div> : <HighlightedCode path={file.path} content={file.content} /> : <p className="plugin-builder-working"><LoaderCircle className="spin" size={14} />Loading file…</p>}
-    </div>
-  </div>;
+  return <WorkspaceFileBrowser files={files} selectedPath={active} onSelect={setSelected} loading={!file && !error} error={error}
+    selectedFile={file ? { ...file, size: files.find(entry => entry.path === file.path)?.size ?? 0, binary: false } : undefined}
+    fileActions={active?.endsWith(".md") ? <div className="file-open-actions"><button type="button" title={source ? "Read document" : "View source"} aria-label={source ? "Read document" : "View source"} onClick={() => setSource(value => !value)}>{source ? <FileText size={14} /> : <FileCode2 size={14} />}</button></div> : null}
+    renderFile={file => file.path.endsWith(".md") && !source
+      ? <div className="plugin-builder-file-markdown"><MarkdownContent text={(file.content ?? "").replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")} /></div>
+      : <HighlightedCode path={file.path} content={file.content ?? ""} />}
+  />;
 }
 
 function PluginChecks({ draft, disabled, operation, onConfigure, onTest }: {
@@ -293,7 +306,7 @@ function PluginChecks({ draft, disabled, operation, onConfigure, onTest }: {
 }
 
 function EmptyView({ icon: Icon, title, text }: { icon: typeof Package; title: string; text: string }) {
-  return <div className="plugin-builder-preview-empty"><div className="plugin-builder-icon"><Icon size={27} /></div><h2>{title}</h2><p>{text}</p></div>;
+  return <div className="plugin-builder-preview-empty"><div className="plugin-builder-icon"><Icon size={20} /></div><h2>{title}</h2><p>{text}</p></div>;
 }
 function statusLabel(status: PluginSetupSummary["status"]): string {
   return { idle: "Ready to build", working: "Building…", ready: "Draft ready to review", installed: "Installed", interrupted: "Run interrupted", error: "Needs attention" }[status];

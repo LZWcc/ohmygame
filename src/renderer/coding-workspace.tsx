@@ -33,7 +33,7 @@ import {
   X,
   type IconComponent,
 } from "./icons.js";
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Tree, type NodeRendererProps, type TreeApi } from "react-arborist";
 import type { PreviewViewport, ProjectFileOpenMode, ProjectState, WorkspaceFile, WorkspaceFileContent } from "../shared/contracts.js";
@@ -412,7 +412,7 @@ export function CodingWorkspace({
         </div>
       ) : null}
       {shownTab === "code" ? (
-        <CodeView
+        <WorkspaceFileBrowser
           files={files}
           selectedPath={selectedCodePath}
           selectedFile={selectedFile}
@@ -862,7 +862,7 @@ export function normalizePreviewPath(value: string): string {
   return path ? `/${path}` : "/";
 }
 
-function CodeView({
+export function WorkspaceFileBrowser({
   files,
   selectedPath,
   selectedFile,
@@ -872,7 +872,9 @@ function CodeView({
   onOpenExternal,
   projectId,
   revision = 0,
-  onFilesChanged,
+  onFilesChanged = () => {},
+  fileActions,
+  renderFile,
 }: {
   files: WorkspaceFile[];
   selectedPath?: string;
@@ -883,7 +885,9 @@ function CodeView({
   onOpenExternal?: (path: string, mode: ProjectFileOpenMode) => Promise<void>;
   projectId?: string;
   revision?: number;
-  onFilesChanged: (change: WorkspaceFileChange) => void;
+  onFilesChanged?: (change: WorkspaceFileChange) => void;
+  fileActions?: ReactNode;
+  renderFile?: (file: WorkspaceFileContent) => ReactNode;
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const tree = useMemo(() => workspaceFileTree(files), [files]);
@@ -1030,12 +1034,14 @@ function CodeView({
           <>
             <div className="file-content-header">
               <span className="file-content-path" title={selectedFile.path}>{selectedFile.path}{selectedFile.truncated ? " (truncated)" : ""}</span>
+              {fileActions}
               {onOpenExternal ? <FileOpenActions path={selectedFile.path} onOpen={onOpenExternal} /> : null}
             </div>
             {selectedMedia && projectId
               ? <WorkspaceMediaPreview projectId={projectId} file={selectedMedia} revision={revision} />
               : selectedFile.binary
               ? <WorkspaceState label="Binary file preview is unavailable" />
+              : renderFile ? renderFile(selectedFile)
               : <HighlightedCode path={selectedFile.path} content={selectedFile.content ?? ""} />}
           </>
         ) : <WorkspaceState icon={<FolderOpen size={20} />} label="Select a file from the workspace tree" />}
@@ -1117,7 +1123,7 @@ export function WorkspaceCodeView({ projectId, revision, openFileRequest }: { pr
     void selectFile(openFileRequest.path);
   }, [openFileRequest?.id]);
 
-  return <CodeView
+  return <WorkspaceFileBrowser
     files={files}
     selectedPath={selectedPath}
     selectedFile={selectedFile}
