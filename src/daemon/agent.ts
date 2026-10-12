@@ -31,6 +31,8 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { PluginMcpHost } from "./plugin-mcp-host.js";
 import { projectProcessEnvironment } from "./project-process.js";
 import { createProviderImageReadTool, installDeepSeekImageFiles } from "./deepseek-image-files.js";
+import { SessionImages } from "./session-images.js";
+import { installSessionImageRequests } from "./session-image-requests.js";
 import { AGENT_ERROR_ENTRY, assistantMessageError, normalizeAgentError, thrownAgentError } from "./agent-errors.js";
 
 export interface CodingSession {
@@ -776,7 +778,9 @@ export class AgentManager {
         return "cancelled";
       }
 
-      managed.session.setActiveToolsByName?.(this.options.activeToolNames?.(project, active.mode, managed.session) ?? BASE_TOOL_NAMES);
+      const activeTools = this.options.activeToolNames?.(project, active.mode, managed.session) ?? BASE_TOOL_NAMES;
+      managed.session.setActiveToolsByName?.(managed.session.getAllTools?.().some((tool) => tool.name === "recall_image")
+        ? [...new Set([...activeTools, "recall_image"])] : activeTools);
       appendPromptDetails(managed.session.sessionManager, active, prompt);
       if (images.length) {
         await managed.session.prompt(prompt, { images: images.map(toPiImage) });
@@ -2210,6 +2214,7 @@ export async function createPiSession(
     appendSystemPrompt: appendSystemPromptForProject(project),
     mcpFactory: mcp?.factory,
   });
+  const images = new SessionImages(sessionManager, path.join(agentDir, "request-image-previews"));
   const { session } = await createAgentSession({
     cwd: project.workspacePath,
     agentDir,
@@ -2217,7 +2222,7 @@ export async function createPiSession(
       shellPath: sessionSettings.getShellPath(),
       commandPrefix: sessionSettings.getShellCommandPrefix(),
       spawnHook: (context) => ({ ...context, env: projectProcessEnvironment(context.env) }),
-    }) as ToolDefinition, ...customTools],
+    }) as ToolDefinition, images.recallTool as ToolDefinition, ...customTools],
     model: model ? compatibleRuntimeModel(model) : undefined,
     modelRuntime,
     resourceLoader,
@@ -2225,6 +2230,7 @@ export async function createPiSession(
     settingsManager: sessionSettings,
   });
   installDeepSeekImageFiles(session, agentDir);
+  installSessionImageRequests(session, images, agentDir);
   mcp?.host.manage(session);
   try { await session.bindExtensions({ mode: "rpc" }); } catch (cause) { session.dispose(); throw cause; }
   return Object.assign(session, {

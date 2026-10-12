@@ -34,6 +34,10 @@ describe("Node proxy transport", () => {
         import { loadEnvironmentFiles } from './src/daemon/environment.ts';
         import { activateNetworkProxy, resolveNetworkProxy } from './src/daemon/proxy.ts';
         import { NetworkSettingsService } from './src/daemon/network-settings.ts';
+        import { SessionManager } from '@earendil-works/pi-coding-agent';
+        import { SessionImages } from './src/daemon/session-images.ts';
+        import { OpenAISessionFiles } from './src/daemon/openai-session-files.ts';
+        import { OpenAISessionTransport } from './src/daemon/openai-session-transport.ts';
         loadEnvironmentFiles(${JSON.stringify(directory)}, 'development');
         const service = new NetworkSettingsService(${JSON.stringify(directory)}, { environment: process.env });
         await service.load();
@@ -51,6 +55,14 @@ describe("Node proxy transport", () => {
         assert.equal((await gemini.models.generateContent({ model: 'probe', contents: 'probe' })).text, 'ok');
         const ws = new WebSocket('wss://model-probe.invalid/ws');
         await once(ws, 'open'); const closed = once(ws, 'close'); ws.close(); await closed;
+        const transport = new OpenAISessionTransport(new SessionImages(SessionManager.inMemory(${JSON.stringify(directory)}), ${JSON.stringify(directory)}), new OpenAISessionFiles(${JSON.stringify(directory)}));
+        try {
+          const response = await transport.wrapFetch(fetch, { connectTimeoutMs: 2000, timeoutMs: 2000 })('https://api.openai.com/v1/responses', {
+            method: 'POST', headers: { authorization: 'Bearer transport-probe', 'content-type': 'application/json' },
+            body: JSON.stringify({ model: 'probe', store: false, stream: true, input: [{ role: 'user', content: [{ type: 'input_text', text: 'probe' }] }] }),
+          });
+          assert.ok((await response.text()).includes('resp-network'));
+        } finally { transport.dispose(); }
         const diagnostic = await service.test({ mode: 'manual', proxyUrl: ${JSON.stringify(proxyUrl)}, noProxy: '' });
         assert.equal(diagnostic.reachable, true); assert.equal(diagnostic.statusCode, 401);
         assert.equal(service.get().active.source, 'environment');
@@ -108,7 +120,7 @@ describe("Node proxy transport", () => {
       });
       proxy.send("report");
       const [report] = (await reportPromise) as [
-        { tunnels: string[]; diagnosticAuthorized: boolean },
+        { tunnels: string[]; diagnosticAuthorized: boolean; responsesAuthorized: boolean; responsesRequests: number },
       ];
       expect(report.tunnels).toEqual(
         expect.arrayContaining([
@@ -124,6 +136,8 @@ describe("Node proxy transport", () => {
       ).toBe(false);
       expect(report.tunnels).not.toContain("all-bypass.invalid:443");
       expect(report.diagnosticAuthorized).toBe(false);
+      expect(report.responsesAuthorized).toBe(true);
+      expect(report.responsesRequests).toBe(1);
     } finally {
       if (proxy.exitCode === null && proxy.signalCode === null) {
         const exited = once(proxy, "exit");

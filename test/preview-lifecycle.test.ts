@@ -345,7 +345,8 @@ describe("preview policy and lifecycle", () => {
       await readFile(path.join(directory, "command.pid"), "utf8"),
     );
     await preview.stop(project);
-    expect(() => process.kill(pid, 0)).toThrow();
+    // The shell's close event can precede the OS reaping its descendants.
+    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(), { timeout: 2_000 });
     project.previewCommand = `${executable} -e "setInterval(()=>{},1000)"`;
     const pending = preview.start(project);
     const rejection = expect(pending).rejects.toThrow("superseded");
