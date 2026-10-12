@@ -12,7 +12,7 @@ import {
   DEFAULT_VIDEO_NODE_CONFIG,
 } from "./generation-config.js";
 import { Check } from "typebox/value";
-import { canvasNodeContent, canvasNodeLayout } from "./canvas-node-layout.js";
+import { canvasNodeContent, canvasNodeLayout, contentNodeSizeIssue, isResizableCanvasNodeType, withoutContentNodeSize } from "./canvas-node-layout.js";
 import { ASSET_CANVAS_EDITOR_LAYOUT_SCHEMA, ASSET_CANVAS_SCHEMA } from "./asset-canvas-schema.js";
 
 export type AssetCanvasStarter = "image" | "video" | "model-3d";
@@ -93,6 +93,12 @@ export function validateAssetCanvasDocument(document: AssetCanvasDocument): void
   if (layoutIds.length !== nodeIds.size || layoutIds.some((id) => !nodeIds.has(id))) {
     throw new Error("Editor layout Node IDs must exactly match board Nodes");
   }
+  for (const node of document.nodes) {
+    const layout = document.editorLayout.nodes[node.id]!;
+    if (!isResizableCanvasNodeType(node.type) && [node.width, node.height, layout.width, layout.height].some((value) => value !== undefined)) {
+      throw new Error(contentNodeSizeIssue(node));
+    }
+  }
   const edgeIds = new Set<string>();
   for (const edge of document.edges) {
     if (edgeIds.has(edge.id)) throw new Error(`Duplicate Asset Canvas edge ID: ${edge.id}`);
@@ -126,6 +132,17 @@ export function validateAssetCanvasDocument(document: AssetCanvasDocument): void
 
 export function isTextGenerationReferenceNode(node: { type?: AssetCanvasNode["type"]; data: object }): boolean {
   return node.type === "text" || node.type === "document" || node.type === "image" || (node.type === "asset" && "mediaType" in node.data && node.data.mediaType === "image");
+}
+
+/** Applies {@link withoutContentNodeSize} to unsaved or copied canvas data created before sizes were validated. */
+export function withoutContentNodeSizes(document: AssetCanvasDocument): AssetCanvasDocument {
+  const nodes = new Map(document.nodes.map((node) => [node.id, node]));
+  const layout: AssetCanvasDocument["editorLayout"]["nodes"] = Object.create(null);
+  for (const [id, position] of Object.entries(document.editorLayout.nodes)) {
+    const node = nodes.get(id);
+    layout[id] = node && !isResizableCanvasNodeType(node.type) ? { x: position.x, y: position.y } : position;
+  }
+  return { ...document, nodes: document.nodes.map(withoutContentNodeSize), editorLayout: { ...document.editorLayout, nodes: layout } };
 }
 
 export function isAssetCanvasDocument(value: unknown): value is AssetCanvasDocument {

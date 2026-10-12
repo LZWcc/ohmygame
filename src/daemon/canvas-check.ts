@@ -2,7 +2,7 @@ import { readCanvasTable } from "./canvas-workspace.js";
 import { canvasNodeAssetIds } from "../shared/canvas-assets.js";
 import { resolveAssetCanvasAssetId } from "../shared/asset-canvas.js";
 import type { CanvasAssetCatalogEntry } from "../shared/canvas-assets.js";
-import { readCanvasBoard, readCanvasIndex, readCanvasDocument } from "./canvas-workspace.js";
+import { inspectCanvasBoard, readCanvasIndex, readCanvasDocument } from "./canvas-workspace.js";
 import { canvasAssetCatalog, readCanvasAssets } from "./canvas-assets.js";
 
 export interface CanvasCheckIssue { file: string; message: string }
@@ -30,8 +30,9 @@ export async function checkCanvasWorkspace(workspace: string): Promise<CanvasChe
   const tableIds = new Set((index.tables ?? []).map((table) => table.id));
   const documentIds = new Set(index.documents.map((document) => document.id));
   for (const entry of index.boards) {
-    const file = `canvas/boards/${entry.id}.json`, detail = await inspect(file, () => readCanvasBoard(workspace, entry.id));
+    const file = `canvas/boards/${entry.id}.json`, inspected = await inspect(file, () => inspectCanvasBoard(workspace, entry.id)), detail = inspected?.detail;
     if (!detail) { if (!issues.some((issue) => issue.file === file)) issues.push({ file, message: "Board file is missing" }); continue; }
+    for (const message of inspected.issues) issues.push({ file: `canvas/editor/${entry.id}.json`, message });
     for (const node of detail.board.nodes) if (node.type === "document" && !documentIds.has(node.data.documentId)) issues.push({ file, message: `Node ${node.id}: unknown document ${node.data.documentId}` });
     for (const node of detail.board.nodes) if (node.type === "table" && !tableIds.has(node.data.tableId)) issues.push({ file, message: `Node ${node.id}: unknown table ${node.data.tableId}` });
     if (manifest) for (const id of canvasNodeAssetIds(detail.board.nodes)) if (!manifest.assets[id]) issues.push({ file, message: `Asset ${id} is not registered in canvas/assets.json` });

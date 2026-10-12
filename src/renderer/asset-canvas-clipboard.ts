@@ -1,7 +1,7 @@
 import type { AssetCanvasEdge, AssetCanvasNode, AssetCanvasReference } from "../shared/contracts.js";
 import { createAssetCanvasDocument, isAssetCanvasDocument } from "../shared/asset-canvas.js";
 import { snapCanvasPosition } from "./canvas-alignment.js";
-import { canvasNodeLayout } from "../shared/canvas-node-layout.js";
+import { canvasNodeLayout, withoutContentNodeSize } from "../shared/canvas-node-layout.js";
 
 export function duplicateAssetCanvasNode(
   node: AssetCanvasNode,
@@ -56,8 +56,10 @@ export function createCanvasClipboard(projectId: string, nodes: AssetCanvasNode[
 export function parseCanvasClipboard(text: string): CanvasClipboard | undefined {
   if (text.length > 4 * 1024 * 1024) return undefined;
   try {
-    const value = JSON.parse(text) as CanvasClipboard;
-    if (value?.format !== "ohmygame/canvas-nodes" || value.version !== 1 || typeof value.projectId !== "string" || !Array.isArray(value.nodes) || !value.nodes.length || !Array.isArray(value.edges)) return;
+    const parsed = JSON.parse(text) as CanvasClipboard;
+    if (parsed?.format !== "ohmygame/canvas-nodes" || parsed.version !== 1 || typeof parsed.projectId !== "string" || !Array.isArray(parsed.nodes) || !parsed.nodes.length || !Array.isArray(parsed.edges)) return;
+    // Nodes copied from a board saved before sizes were validated may still carry them.
+    const value = { ...parsed, nodes: parsed.nodes.map(withoutContentNodeSize) };
     if (value.nodes.some((node) => !Number.isFinite(node?.position?.x) || !Number.isFinite(node?.position?.y))) return;
     const canvas = createAssetCanvasDocument();
     canvas.nodes = value.nodes; canvas.edges = value.edges;
