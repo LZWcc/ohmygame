@@ -2329,9 +2329,32 @@ select.settings-search-input {
 }
 
 .settings-about-status {
+  display: grid;
+  min-width: 220px;
   color: var(--text-secondary);
   font-size: 12px;
+  gap: 8px;
   line-height: 1.5;
+}
+
+.settings-update-error {
+  max-width: 480px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 7%, var(--surface));
+}
+.settings-update-error p { margin: 0; }
+.settings-update-data-safe { margin-top: 5px !important; color: var(--text); font-weight: 500; }
+.settings-update-error details { margin-top: 7px; }
+.settings-update-error summary { cursor: pointer; user-select: none; }
+.settings-update-error code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  white-space: pre-wrap;
 }
 
 .settings-about-update {

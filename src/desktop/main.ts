@@ -14,7 +14,7 @@ import { createNetworkDispatcher } from "../daemon/proxy.js";
 import { electronProxyConfig, prepareDesktopNetwork, proxyCredentials } from "./network.js";
 import { loadEnvironmentFiles } from "../daemon/environment.js";
 import { createDesktopWindow, fitPlaytestContentSize, isValidPlaytestViewport, waitForRenderer, windowsTitleBarOverlay } from "./window.js";
-import { DesktopUpdater } from "./updater.js";
+import { DesktopUpdatePreparationError, DesktopUpdater } from "./updater.js";
 import { ElectronPlaytestDriver } from "./playtest-driver.js";
 import { WebGamePlayerWindows, type WebGamePlayerTarget } from "./web-game-player.js";
 import { RendererCloseRequest } from "./renderer-close.js";
@@ -70,11 +70,26 @@ async function stopServices(): Promise<void> {
   await Promise.all([daemon?.stop(), oauth.cancel()]);
 }
 
-function prepareShutdown(): Promise<void> {
+function prepareShutdown(forUpdate = false): Promise<void> {
   shutdown ??= (async () => {
-    if (mainWindow && !mainWindow.isDestroyed()) await rendererClose?.request();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      try {
+        await rendererClose?.request();
+      } catch (cause) {
+        if (forUpdate) throw new DesktopUpdatePreparationError("save", cause instanceof Error ? cause.message : String(cause));
+        throw cause;
+      }
+    }
     quitting = true;
-    await stopServices().catch((cause) => console.error("Could not stop desktop services", cause));
+    try {
+      await stopServices();
+    } catch (cause) {
+      console.error("Could not stop desktop services", cause);
+      if (forUpdate) {
+        quitting = false;
+        throw new DesktopUpdatePreparationError("shutdown", cause instanceof Error ? cause.message : String(cause));
+      }
+    }
   })().catch((cause) => { shutdown = undefined; throw cause; });
   return shutdown;
 }
@@ -442,7 +457,7 @@ try {
     },
   });
   await daemon.start();
-  updater = new DesktopUpdater(app.getVersion(), prepareShutdown);
+  updater = new DesktopUpdater(app.getVersion(), () => prepareShutdown(true));
 
   if (!useBuiltRenderer) await waitForRenderer(developmentRendererUrl);
   updater.subscribe((state) => mainWindow?.webContents.send("ohmygame:update-state", state));

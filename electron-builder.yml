@@ -52,6 +52,10 @@ win:
     - nsis
   artifactName: OhMyGame-${version}-${arch}.${ext}
 
+nsis:
+  include: build/installer.nsh
+  deleteAppDataOnUninstall: false
+
 publish:
   provider: generic
   url: ${env.DESKTOP_UPDATE_URL}
