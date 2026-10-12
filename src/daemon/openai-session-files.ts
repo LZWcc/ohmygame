@@ -16,6 +16,8 @@ async function mutate(file: string, action: () => Promise<void>): Promise<void> 
   try { await operation; } finally { if (mutations.get(file) === operation) mutations.delete(file); }
 }
 export interface UsedOpenAIFile { path: string; id: string }
+export const openAIRequestScope = (headers: Headers): string => createHash("sha256").update(JSON.stringify(
+  [headers.get("authorization"), headers.get("openai-organization"), headers.get("openai-project")])).digest("hex");
 
 /** This API is enabled only for Platform API keys at the official Responses endpoint. */
 export class OpenAISessionFiles {
@@ -27,8 +29,7 @@ export class OpenAISessionFiles {
       throw new Error("OpenAI image files exceed the request image limit");
     }
     const replacements: Array<{ image: WireImage; file: UsedOpenAIFile }> = [];
-    const scope = createHash("sha256").update(JSON.stringify([headers.get("authorization"),
-      headers.get("openai-organization"), headers.get("openai-project")])).digest("hex");
+    const scope = openAIRequestScope(headers);
     let next = 0;
     const controller = new AbortController();
     const operationSignal = AbortSignal.any([signal, controller.signal]);

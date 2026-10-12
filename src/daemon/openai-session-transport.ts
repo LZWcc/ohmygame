@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { getGlobalDispatcher, WebSocket as UndiciWebSocket } from "undici/index.js";
 import { ImageBudgetError, localImageError, MODEL_REQUEST_HIGH_BYTES, object, SessionImages, type Json } from "./session-images.js";
-import { OpenAISessionFiles, rejectedOpenAIFiles, isRejectedOpenAIFileError, type UsedOpenAIFile } from "./openai-session-files.js";
+import { OpenAISessionFiles, openAIRequestScope, rejectedOpenAIFiles, isRejectedOpenAIFileError, type UsedOpenAIFile } from "./openai-session-files.js";
 
 export interface ResponseSocket extends EventTarget {
   readonly readyState: number;
@@ -21,8 +21,6 @@ async function sizeRejected(response: Response): Promise<boolean> {
   const body: unknown = await response.clone().json().catch(() => undefined);
   return object(body) && object(body.error) && sizeErrorCode(body.error.code);
 }
-const scopeOf = (headers: Headers) => createHash("sha256").update(JSON.stringify(
-  [headers.get("authorization"), headers.get("openai-organization"), headers.get("openai-project")])).digest("hex");
 export function isOfficialOpenAIResponses(url: string): boolean {
   try {
     const parsed = new URL(url);
@@ -83,7 +81,7 @@ export class OpenAISessionTransport {
       const original: unknown = await request.json();
       if (!object(original)) return localImageError(new ImageBudgetError());
       await this.invalidations;
-      const scope = scopeOf(request.headers);
+      const scope = openAIRequestScope(request.headers);
       if (scope !== this.scope || this.dispatcher !== getGlobalDispatcher()) {
         this.dispose(); this.scope = scope; this.dispatcher = getGlobalDispatcher(); this.fallbackUntil = 0; this.filesUnavailableUntil = 0;
       }
