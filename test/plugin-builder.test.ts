@@ -8,6 +8,7 @@ import { PluginCapabilities } from "../src/daemon/plugin-capabilities.js";
 import { LocalPluginStore } from "../src/daemon/local-plugins.js";
 import { LocalPluginAdapter, PluginCatalogService } from "../src/daemon/plugin-catalog.js";
 import { PluginSettingsStore } from "../src/daemon/plugin-settings.js";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { readPluginBuilderInput, savePluginBuilderInput } from "../src/renderer/plugin-builder-drafts.js";
 
 const cleanup: Array<() => Promise<unknown>> = [];
@@ -114,6 +115,74 @@ describe("Plugin Builder", () => {
     expect(preview.installedRevision).toBeUndefined();
     expect(preview.files).toEqual(draft.files);
     expect(await resumed.installDraft(state.id, preview.revision!)).toMatchObject({ status: "installed", pluginId: "personal:design-review" });
+  });
+
+  it("preserves the latest configuration and cleared secrets through uninstall, restart, and reinstall", async () => {
+    const { setup, directory, local, capabilities, manager } = await environment();
+    const state = await setup.create();
+    const draft = await setup.prepare(state.id, await writeDraft(directory, state.id, true));
+    await setup.configuration(state.id, { key: "original-key" });
+    await setup.installDraft(state.id, draft.revision!);
+    await setup.configuration(state.id, { key: "latest-key" });
+    const stored = JSON.parse(await readFile(capabilities.configuration.filePath, "utf8"));
+    expect(stored.plugins[`draft:${state.id}`]).toBeUndefined();
+    expect(Object.keys(stored.credentials)).toHaveLength(1);
+    await local.remove("personal:design-review");
+    await setup.close();
+    const resumed = manager(); cleanup.push(() => resumed.close());
+    expect((await resumed.configuration(state.id)).configuredSecrets).toEqual(["key"]);
+    await resumed.installDraft(state.id, draft.revision!);
+    const plugin = (await local.read("personal:design-review"))!;
+    expect(capabilities.configuration.resolved(plugin).key).toBe("latest-key");
+    await local.remove(plugin.id);
+    await resumed.configuration(state.id, { key: null });
+    await resumed.installDraft(state.id, draft.revision!);
+    expect(capabilities.configuration.view(plugin).configuredSecrets).toEqual([]);
+  });
+
+  it("retains an installed package and its draft credentials for retry when configuration promotion fails", async () => {
+    const { setup, directory, app, local, capabilities, manager, invalidate } = await environment();
+    const state = await setup.create();
+    const draft = await setup.prepare(state.id, await writeDraft(directory, state.id, true));
+    await setup.configuration(state.id, { key: "draft-private-key" });
+    const promote = vi.spyOn(capabilities.configuration, "promoteDraft").mockRejectedValueOnce(new Error("Configuration write failed"));
+    const failed = await app.inject({ method: "POST", url: `/plugins/setup-sessions/${state.id}/install`, payload: { revision: draft.revision } });
+    expect(failed.statusCode).toBe(409);
+    expect(await setup.read(state.id)).toMatchObject({ pluginId: "personal:design-review", status: "error", busy: false, error: "Configuration write failed" });
+    expect((await local.list()).plugins).toHaveLength(1);
+    expect(invalidate).toHaveBeenCalledOnce();
+    expect((await app.inject({ method: "DELETE", url: `/plugins/setup-sessions/${state.id}` })).statusCode).toBe(409);
+    expect((await setup.configuration(state.id)).configuredSecrets).toEqual(["key"]);
+    await setup.close();
+    const resumed = manager(); cleanup.push(() => resumed.close());
+    expect(await resumed.installDraft(state.id, draft.revision!)).toMatchObject({ status: "installed", pluginId: "personal:design-review", error: undefined });
+    expect(capabilities.configuration.resolved((await local.read("personal:design-review"))!).key).toBe("draft-private-key");
+    expect((await resumed.draft(state.id)).installedRevision).toBe(draft.revision);
+    promote.mockRestore();
+  });
+
+  it("does not overwrite installed values when retrying a draft that was already promoted", async () => {
+    const { setup, directory, capabilities, local } = await environment();
+    const state = await setup.create();
+    const draft = await setup.prepare(state.id, await writeDraft(directory, state.id, true));
+    await setup.configuration(state.id, { key: "draft-key" });
+    await setup.installDraft(state.id, draft.revision!);
+    const plugin = (await local.read("personal:design-review"))!;
+    await capabilities.configuration.update(plugin, { key: "latest-key" });
+    await capabilities.configuration.promoteDraft({ ...draft.plugin!, id: `draft:${state.id}` }, plugin);
+    expect(capabilities.configuration.resolved(plugin).key).toBe("latest-key");
+  });
+
+  it("lists workspace metadata without loading conversation history", async () => {
+    const { setup, manager } = await environment();
+    const state = await setup.create();
+    await setup.close();
+    const resumed = manager(); cleanup.push(() => resumed.close());
+    const history = vi.spyOn(SessionManager, "continueRecent");
+    try {
+      expect((await resumed.list()).map(item => item.id)).toEqual([state.id]);
+      expect(history).not.toHaveBeenCalled();
+    } finally { history.mockRestore(); }
   });
 
   it("deletes a draft workspace and only its own saved configuration", async () => {

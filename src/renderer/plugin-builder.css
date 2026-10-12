@@ -4,7 +4,6 @@
 .plugin-builder-error { padding: 12px; margin: 12px 0; border-radius: 6px; background: color-mix(in srgb, var(--danger) 7%, transparent); color: var(--danger); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .plugin-builder-error button { margin-left: 8px; }
 .plugin-builder-notice { margin: 12px 0; color: var(--text-secondary); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.plugin-builder-notice a { color: var(--text); text-underline-offset: 3px; }
 .plugin-builder-notice summary { cursor: pointer; }
 .plugin-builder-notice pre { font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .plugin-builder-preview { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
@@ -21,8 +20,6 @@
 .plugin-builder-section-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 .plugin-builder-section-heading h3 { margin: 0; font-size: 12px; font-weight: 600; }
 .plugin-builder-section-heading > span { color: var(--text-muted); font-size: 10px; }
-.plugin-builder-section-heading > button { margin-left: auto; }
-.plugin-builder-section-heading button { display: inline-flex; align-items: center; gap: 4px; padding: 4px 0; border: 0; background: transparent; color: var(--text-secondary); font-size: 10px; cursor: pointer; }
 .plugin-builder-component { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .plugin-builder-component > svg { flex-shrink: 0; color: var(--text-secondary); }
 .plugin-builder-component > svg:last-child { margin-left: auto; }

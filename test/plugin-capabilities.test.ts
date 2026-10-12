@@ -715,10 +715,9 @@ describe("native plugin capabilities", () => {
         expect(current.turns.flatMap((turn: { items: unknown[] }) => turn.items)).toEqual(expect.arrayContaining([
           expect.objectContaining({ type: "dynamicToolCall", tool: "plugin_manage", status: "completed" }),
         ]));
-        expect(current.messages).toContainEqual({
-          role: "assistant",
-          text: "Prepared the MCP plugin draft. Review it in the builder.",
-        });
+        expect(current.turns.flatMap((turn: { items: unknown[] }) => turn.items)).toContainEqual(expect.objectContaining({
+          type: "agentMessage", text: "Prepared the MCP plugin draft. Review it in the builder.",
+        }));
       },
       { timeout: 15_000 },
     );
@@ -754,14 +753,11 @@ describe("native plugin capabilities", () => {
           method: "GET",
           url: `/plugins/setup-sessions/${state.id}`,
         })
-      ).json().messages,
-    ).toEqual([
-      { role: "user", text: "Create an MCP plugin" },
-      {
-        role: "assistant",
-        text: "Prepared the MCP plugin draft. Review it in the builder.",
-      },
-    ]);
+      ).json().turns.flatMap((turn: { items: unknown[] }) => turn.items),
+    ).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "userMessage", text: "Create an MCP plugin" }),
+      expect.objectContaining({ type: "agentMessage", text: "Prepared the MCP plugin draft. Review it in the builder." }),
+    ]));
     expect(receivedToolResult).toBe(true);
     expect(
       (
@@ -908,7 +904,7 @@ describe("native plugin capabilities", () => {
           url: `/plugins/setup-sessions/${response.json().id}`,
         })
       ).json(),
-    ).toMatchObject({ id: response.json().id, messages: [], busy: false });
+    ).toMatchObject({ id: response.json().id, turns: [], busy: false });
     expect(
       (await app.inject({ method: "GET", url: "/projects" })).json(),
     ).toEqual([]);

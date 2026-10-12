@@ -16,18 +16,20 @@ const plugin: PluginDetail = {
 };
 const state: PluginSetupState = {
   id: sessionId, pluginId: plugin.id, title: plugin.displayName, status: "installed",
-  createdAt: 0, updatedAt: 0, busy: false, messages: [], turns: [],
+  createdAt: 0, updatedAt: 0, busy: false, turns: [],
 };
 const revision = "a".repeat(64);
 let root: ReturnType<typeof createRoot>;
 let container: HTMLDivElement;
 let installed: boolean;
+let installationFailed: boolean;
 let requests: string[];
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
   window.location.hash = `#/plugins/builder/${sessionId}`;
   installed = true;
+  installationFailed = false;
   requests = [];
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     const route = new URL(url, "http://localhost").pathname.replace(/^\/api/, "");
@@ -35,13 +37,18 @@ beforeEach(() => {
     requests.push(`${method} ${route}`);
     if (route === "/health") return Response.json({ status: "ok" });
     if (route === "/models") return Response.json({ models: [], providers: [] });
+    if (route === `/plugins/setup-sessions/${sessionId}/install` && method === "POST") {
+      installed = true;
+      installationFailed = true;
+      return Response.json({ error: "Configuration could not be saved" }, { status: 409 });
+    }
     if (method === "DELETE") {
       if (route === `/plugins/${encodeURIComponent(plugin.id)}`) installed = false;
       else if (route !== `/plugins/setup-sessions/${sessionId}`) throw new Error(`Unexpected request: ${route}`);
       return new Response(null, { status: 204 });
     }
-    if (route === `/plugins/setup-sessions/${sessionId}`) return Response.json(installed ? state : { ...state, pluginId: undefined, status: "ready" });
-    if (route === `/plugins/setup-sessions/${sessionId}/draft`) return Response.json({ path: "review", revision, installedRevision: installed ? revision : undefined, plugin: { ...plugin, installed: false }, files: [], errors: [] });
+    if (route === `/plugins/setup-sessions/${sessionId}`) return Response.json(installationFailed ? { ...state, status: "error", error: "Configuration could not be saved" } : installed ? state : { ...state, pluginId: undefined, status: "ready" });
+    if (route === `/plugins/setup-sessions/${sessionId}/draft`) return Response.json({ path: "review", revision, installedRevision: installed && !installationFailed ? revision : undefined, plugin: { ...plugin, installed: false }, files: [], errors: [] });
     if (route === `/plugins/${encodeURIComponent(plugin.id)}`) return Response.json(plugin);
     throw new Error(`Unexpected request: ${route}`);
   }));
@@ -86,5 +93,17 @@ describe("Plugin Builder removal controls", () => {
   it("does not offer uninstalling a built-in plugin", async () => {
     await act(async () => root.render(<PluginUninstallButton plugin={{ ...plugin, source: { type: "builtIn" } }} onUninstall={() => {}} />));
     expect(button("Uninstall plugin")).toBeNull();
+  });
+
+  it("refreshes after a partial installation failure so uninstall and retry stay available", async () => {
+    installed = false;
+    await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));
+    const install = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Install plugin")!;
+    await act(async () => install.click());
+    expect(button("Uninstall plugin")).not.toBeNull();
+    expect(button("Delete plugin draft")).toBeNull();
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Configuration could not be saved");
+    const retry = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Update plugin");
+    expect(retry?.disabled).toBe(false);
   });
 });

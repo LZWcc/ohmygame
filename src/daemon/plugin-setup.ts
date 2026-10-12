@@ -23,7 +23,6 @@ import type { FastifyInstance } from "fastify";
 import type {
   PluginSetupPrompt,
   PluginSetupState,
-  PluginSetupMessage,
   PluginSetupSummary,
   PluginDraft,
 } from "../shared/plugin-setup.js";
@@ -47,7 +46,7 @@ ${PLUGIN_AUTHORING_RULES}
 Use plugin_manage for structured operations. Call list/read before changing an existing plugin. Use bash/read/write/edit to author Skills and scripts in this workspace. Call prepare with input {path: "relative/plugin-directory"} when the draft is ready; fix its reported errors. create-mcp prepares an uninstalled draft for existing MCP services. The user reviews the preview and clicks Install plugin; do not claim a draft has been installed. After changes call prepare again so the preview stays current. Never modify credentials or session files.
 For installed plugins you may configure nonsecret values, inspect or edit MCP templates and test connections. Keep answers concise, explain what changed and what input is still required, and match the user's language.`;
 
-type SetupRuntimeState = PluginSetupSummary & { busy: boolean; activity?: string; error?: string; draftPath?: string; installedRevision?: string; checks?: PluginDraft["checks"] };
+type SetupRuntimeState = PluginSetupSummary & { busy: boolean; configurationId: string; error?: string; draftPath?: string; installedRevision?: string; checks?: PluginDraft["checks"] };
 
 export class PluginSetupManager {
   #states = new Map<string, SetupRuntimeState>();
@@ -74,13 +73,15 @@ export class PluginSetupManager {
   }
   async create(pluginId?: string): Promise<PluginSetupState> {
     if (this.#closed) throw new Error("Plugin assistant is closed");
-    if (pluginId && !(await this.plugins.read(pluginId)))
-      throw new Error("Plugin not found");
+    const plugin = pluginId ? await this.plugins.read(pluginId) : undefined;
+    if (pluginId && !plugin) throw new Error("Plugin not found");
+    const id = randomUUID();
     const state: SetupRuntimeState = {
-      id: randomUUID(),
+      id,
       pluginId,
+      configurationId: pluginId ?? `draft:${id}`,
       busy: false,
-      title: pluginId ? (await this.plugins.read(pluginId))!.displayName : "New plugin",
+      title: plugin?.displayName ?? "New plugin",
       createdAt: Date.now(), updatedAt: Date.now(), status: "idle",
     };
     this.#states.set(state.id, state);
@@ -90,6 +91,10 @@ export class PluginSetupManager {
     return this.read(state.id);
   }
   async read(id: string): Promise<PluginSetupState> {
+    const state = await this.#loadState(id);
+    return { ...structuredClone(summary(state)), busy: state.busy, error: state.error, turns: this.#turns(id, state) };
+  }
+  async #loadState(id: string): Promise<SetupRuntimeState> {
     if (!/^[0-9a-f-]{36}$/.test(id))
       throw new Error("Invalid plugin setup session");
     let state = this.#states.get(id);
@@ -100,6 +105,7 @@ export class PluginSetupManager {
       state = {
         id,
         pluginId: stored.pluginId,
+        configurationId: stored.configurationId ?? stored.pluginId ?? `draft:${id}`,
         error: stored.error,
         busy: false,
         title: stored.title ?? "Plugin workspace",
@@ -129,8 +135,7 @@ export class PluginSetupManager {
         await this.#save(state);
       }
     }
-    const { draftPath: _path, installedRevision: _revision, checks: _checks, ...publicState } = structuredClone(state);
-    return { ...publicState, messages: this.#messages(id), turns: this.#turns(id, state) };
+    return state;
   }
   async list(): Promise<PluginSetupSummary[]> {
     const directory = path.join(this.dataDirectory, "plugin-setup");
@@ -138,13 +143,12 @@ export class PluginSetupManager {
       if (cause.code === "ENOENT") return [];
       throw cause;
     });
-    const results = await Promise.allSettled(entries.filter(id => /^[0-9a-f-]{36}$/.test(id)).map(id => this.read(id)));
+    const results = await Promise.allSettled(entries.filter(id => /^[0-9a-f-]{36}$/.test(id)).map(id => this.#loadState(id)));
     return results.flatMap(result => result.status === "fulfilled" ? [summary(result.value)] : [])
       .sort((a, b) => b.updatedAt - a.updatedAt);
   }
   async remove(id: string): Promise<void> {
-    await this.read(id);
-    const state = this.#states.get(id)!;
+    const state = await this.#loadState(id);
     if (state.busy) throw new Error("Wait for the builder to finish before deleting its workspace");
     state.busy = true;
     try {
@@ -191,15 +195,13 @@ export class PluginSetupManager {
     return turns;
   }
   async draft(id: string): Promise<PluginDraft> {
-    await this.read(id);
-    const state = this.#states.get(id)!;
+    const state = await this.#loadState(id);
     if (!state.draftPath) return { files: [], errors: [] };
     const root = await pluginDraftPath(path.join(this.#directory(id), "workspace"), state.draftPath);
     return { ...await inspectPluginDraft(root, state.installedRevision), path: state.draftPath, checks: state.checks };
   }
   async prepare(id: string, requested: string): Promise<PluginDraft> {
-    await this.read(id);
-    const state = this.#states.get(id)!;
+    const state = await this.#loadState(id);
     const workspace = path.join(this.#directory(id), "workspace");
     const root = await pluginDraftPath(workspace, requested);
     state.draftPath = path.relative(workspace, root) || ".";
@@ -211,8 +213,7 @@ export class PluginSetupManager {
     return draft;
   }
   async file(id: string, requested: string) {
-    await this.read(id);
-    const state = this.#states.get(id)!;
+    const state = await this.#loadState(id);
     if (!state.draftPath) throw new Error("No plugin draft yet");
     const root = await pluginDraftPath(path.join(this.#directory(id), "workspace"), state.draftPath);
     return readPluginDraftFile(root, requested);
@@ -235,11 +236,10 @@ export class PluginSetupManager {
     } finally { state.busy = false; await this.#save(state); }
   }
   #configurationPlugin(state: SetupRuntimeState, plugin: import("../shared/plugins.js").PluginDetail) {
-    return state.pluginId === plugin.id ? plugin : { ...plugin, id: `draft:${state.id}` };
+    return state.configurationId === plugin.id ? plugin : { ...plugin, id: `draft:${state.id}` };
   }
   async testDraft(id: string, server: string, revision: string) {
-    await this.read(id);
-    const state = this.#states.get(id)!;
+    const state = await this.#loadState(id);
     if (state.busy) throw new Error("Wait for the builder to finish before testing");
     state.busy = true;
     try {
@@ -253,23 +253,37 @@ export class PluginSetupManager {
     } finally { state.busy = false; await this.#save(state); }
   }
   async installDraft(id: string, revision: string): Promise<PluginSetupState> {
-    await this.read(id);
-    const state = this.#states.get(id)!;
+    const state = await this.#loadState(id);
     if (state.busy) throw new Error("Wait for the builder to finish before installing");
     state.busy = true;
+    let packageInstalled = false;
     try {
       const draft = await this.draft(id);
       if (draft.errors.length || !draft.plugin || !state.draftPath) throw new Error(draft.errors.join("\n") || "No valid plugin draft yet");
       if (draft.revision !== revision) throw new Error("The draft changed. Review it again before installing");
       const root = await pluginDraftPath(path.join(this.#directory(id), "workspace"), state.draftPath);
-      const values = this.capabilities.configuration.resolved(this.#configurationPlugin(state, draft.plugin));
+      const configurable = this.#configurationPlugin(state, draft.plugin);
       const plugin = await this.localPlugins.install(root);
-      await this.capabilities.configuration.update(plugin, values);
+      packageInstalled = true;
       state.pluginId = plugin.id;
+      // Record the installed package before migrating configuration. A failed
+      // migration must still expose uninstall and allow a retry after restart.
+      await this.#save(state);
+      if (configurable.id !== plugin.id) {
+        await this.capabilities.configuration.promoteDraft(configurable, plugin);
+        state.configurationId = plugin.id;
+      }
       state.installedRevision = revision;
       state.status = "installed"; state.error = undefined; state.updatedAt = Date.now();
-      this.invalidate();
-    } finally { state.busy = false; await this.#save(state); }
+    } catch (cause) {
+      state.status = "error";
+      state.error = cause instanceof Error ? cause.message : String(cause);
+      throw cause;
+    } finally {
+      if (packageInstalled) this.invalidate();
+      state.busy = false;
+      await this.#save(state);
+    }
     return this.read(id);
   }
   #sessionManager(id: string): SessionManager {
@@ -283,26 +297,8 @@ export class PluginSetupManager {
     }
     return history;
   }
-  #messages(id: string): PluginSetupMessage[] {
-    return this.#sessionManager(id)
-      .getBranch()
-      .flatMap((entry) => {
-        if (entry.type !== "message") return [];
-        const message = entry.message;
-        if (message.role !== "user" && message.role !== "assistant") return [];
-        const text =
-          typeof message.content === "string"
-            ? message.content
-            : message.content
-                .filter((c) => c.type === "text")
-                .map((c) => c.text)
-                .join("\n");
-        return text ? [{ role: message.role, text }] : [];
-      });
-  }
   async prompt(id: string, input: PluginSetupPrompt): Promise<void> {
-    await this.read(id);
-    const state = this.#states.get(id)!;
+    const state = await this.#loadState(id);
     if (state.busy) throw new Error("The plugin assistant is already working");
     if (this.#closed) throw new Error("Plugin assistant is closed");
     state.busy = true;
@@ -328,7 +324,6 @@ export class PluginSetupManager {
       })
       .finally(async () => {
         state.busy = false;
-        state.activity = undefined;
         this.#live.delete(id);
         state.status = state.error ? "error" : this.#aborted.has(id) || this.#closed ? "interrupted" : state.draftPath ? "ready" : "idle";
         state.updatedAt = Date.now();
@@ -399,15 +394,8 @@ export class PluginSetupManager {
       return;
     }
     const unsubscribe = session.subscribe((event) => {
-      if (event.type === "tool_execution_start")
-        state.activity = event.toolName;
-      if (event.type === "tool_execution_end") state.activity = undefined;
       if (event.type === "message_update") {
-        const message = event.message as {
-          role?: string;
-          content?: Array<{ type: string; text?: string }>;
-        };
-        if (message.role === "assistant")
+        if (event.message.role === "assistant")
         {
           const entries: SessionEntry[] = [...this.#sessionManager(state.id).getBranch(), {
             type: "message", id: `${state.id}:live`, parentId: null,
@@ -415,12 +403,6 @@ export class PluginSetupManager {
           }];
           this.#live.set(state.id, conversationItems(entries, false).filter(item => item.id.startsWith(`${state.id}:live`))
             .map(item => item.type === "agentMessage" || item.type === "reasoning" ? { ...item, status: "inProgress" } : item));
-          state.activity =
-            message.content
-              ?.filter((c) => c.type === "text")
-              .map((c) => c.text ?? "")
-              .join("")
-              .slice(-4000) || state.activity;
         }
       }
       if (event.type === "message_end") this.#live.delete(state.id);
@@ -562,9 +544,7 @@ export class PluginSetupManager {
   }
   #save(state: SetupRuntimeState): Promise<void> {
     const filePath = path.join(this.#directory(state.id), "state.json");
-    const contents = JSON.stringify({
-      ...state, activity: undefined,
-    });
+    const contents = JSON.stringify(state);
     const write = (this.#writes.get(state.id) ?? Promise.resolve())
       .catch(() => {})
       .then(async () => {
@@ -586,7 +566,7 @@ export class PluginSetupManager {
   }
 }
 
-function summary(state: PluginSetupState): PluginSetupSummary {
+function summary(state: PluginSetupSummary): PluginSetupSummary {
   const { id, pluginId, title, createdAt, updatedAt, status, model, reasoningLevel } = state;
   return { id, pluginId, title, createdAt, updatedAt, status, model, reasoningLevel };
 }

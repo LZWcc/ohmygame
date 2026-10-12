@@ -51,12 +51,20 @@ const TABS: WorkspaceTabOption<BuilderView>[] = [
   { id: "configuration", label: "Setup", icon: Settings }, { id: "checks", label: "Checks", icon: Check },
 ];
 
+async function loadBuilderSnapshot(sessionId: string, state?: PluginSetupState) {
+  state ??= await readPluginSetup(sessionId);
+  const [draft, installed] = await Promise.all([
+    readPluginDraft(sessionId),
+    state.pluginId ? readPlugin(state.pluginId) : undefined,
+  ]);
+  return { state, draft, installed };
+}
+
 export function PluginBuilder({ sessionId }: { sessionId: string }) {
   const generation = useReadyRuntimeGeneration();
   const catalog = useAgentModels();
-  const [state, setState] = useState<PluginSetupState>();
-  const [draft, setDraft] = useState<PluginDraft>();
-  const [installed, setInstalled] = useState<PluginDetail>();
+  const [snapshot, setSnapshot] = useState<Awaited<ReturnType<typeof loadBuilderSnapshot>>>();
+  const { state, draft, installed } = snapshot ?? {};
   const [input, setInput] = useState(() => readPluginBuilderInput(sessionId, typeof window === "undefined" ? undefined : window.localStorage));
   const [view, setView] = useState<BuilderView>("overview");
   const [error, setError] = useState<string>();
@@ -83,13 +91,9 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   useEffect(() => {
     let active = true;
     setError(undefined);
-    void (async () => {
-      await waitForRuntime();
-      const next = await readPluginSetup(sessionId);
-      const preview = await readPluginDraft(sessionId);
-      const currentPlugin = next.pluginId ? await readPlugin(next.pluginId) : undefined;
-      if (active) { setState(next); setDraft(preview); setInstalled(currentPlugin); }
-    })().catch(cause => { if (active) setError(message(cause)); });
+    void waitForRuntime().then(() => loadBuilderSnapshot(sessionId))
+      .then(next => { if (active) setSnapshot(next); })
+      .catch(cause => { if (active) setError(message(cause)); });
     return () => { active = false; };
   }, [sessionId, generation, retry]);
   useEffect(() => {
@@ -101,17 +105,19 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
       void readPluginSetup(sessionId).then(async next => {
         if (!active) return;
         if (!next.busy) {
-          const preview = await readPluginDraft(sessionId);
-          const currentPlugin = next.pluginId ? await readPlugin(next.pluginId) : undefined;
-          if (active) { setState(next); setDraft(preview); setInstalled(currentPlugin); setError(undefined); }
-        } else { setState(next); setError(undefined); }
+          const snapshot = await loadBuilderSnapshot(sessionId, next);
+          if (active) { setSnapshot(snapshot); setError(undefined); }
+        } else {
+          setSnapshot(current => current ? { ...current, state: next } : current);
+          setError(undefined);
+        }
       }).catch(cause => { if (active) setError(message(cause)); }).finally(() => { inFlight = false; });
     }, 700);
     return () => { active = false; window.clearInterval(timer); };
   }, [sessionId, state?.busy]);
   useEffect(() => {
     if (state?.turns.length && following.current && timeline.current) timeline.current.scrollTop = timeline.current.scrollHeight;
-  }, [state?.turns, state?.activity]);
+  }, [state?.turns]);
 
   async function action(name: string, run: () => Promise<void>) {
     if (disabled) return;
@@ -120,9 +126,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
     finally { setOperation(undefined); }
   }
   async function refresh() {
-    const [next, preview] = await Promise.all([readPluginSetup(sessionId), readPluginDraft(sessionId)]);
-    setState(next); setDraft(preview);
-    setInstalled(next.pluginId ? await readPlugin(next.pluginId) : undefined);
+    setSnapshot(await loadBuilderSnapshot(sessionId));
   }
   async function send() {
     if (!state || !model || !input.prompt.trim() || disabled) return;
@@ -131,7 +135,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
       const next = await promptPluginSetup(sessionId, sent, { provider: model.provider, id: model.id }, reasoning);
       setInput(current => current.prompt === sent ? { ...current, prompt: "" } : current);
       following.current = true;
-      setState(next);
+      setSnapshot(current => current ? { ...current, state: next } : current);
       if (!next.busy) await refresh();
     });
   }
@@ -139,6 +143,52 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
     setAgentCollapsed(false);
     setInput(current => ({ ...current, prompt: current.prompt.trim() ? `${current.prompt.trimEnd()}\n\n${prompt}` : prompt }));
     requestAnimationFrame(() => textarea.current?.focus());
+  }
+  function setFileRequest(file: string) { updateFileRequest({ path: file, id: Date.now() }); }
+  async function toggleMcp(id: string, enabled: boolean) {
+    if (!installed) return;
+    const components = Object.fromEntries([
+      ...installed.skills.map(skill => [pluginComponentKey("skill", skill.id), skill.enabled]),
+      ...(installed.mcpServers ?? []).map(server => [pluginComponentKey("mcp", server.id), server.enabled]),
+    ]);
+    await updatePluginSettings(installed.id, { enabled: installed.enabled, components: { ...components, [pluginComponentKey("mcp", id)]: enabled } });
+    await refresh();
+  }
+  function previewContent() {
+    switch (view) {
+      case "overview":
+        return <>
+          {draft?.errors.length ? <p className="plugin-builder-error" role="alert">{draft.errors.join(" ")}</p> : null}
+          {plugin ? <PluginOverview plugin={plugin} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} /> : <EmptyView label="No draft" />}
+        </>;
+      case "files":
+        return <PluginFiles sessionId={sessionId} draft={draft} installed={installed} request={fileRequest} />;
+      case "configuration": {
+        if (!plugin) return <EmptyView label="No configuration" />;
+        const installedSetup = draftPlugin ? undefined : installed;
+        const hasConnections = Boolean(installedSetup && (installedSetup.mcpServers?.length || installedSetup.connections.length));
+        return <>
+          <fieldset className="plugin-builder-config" disabled={disabled}>
+            <PluginConfigurationPanel key={`${sessionId}:${draft?.revision ?? plugin.id}`} plugin={plugin} setupId={draftPlugin ? sessionId : undefined} compact onChanged={() => void refresh().catch(cause => setError(message(cause)))} />
+          </fieldset>
+          {installedSetup ? <PluginMcpPanel plugin={installedSetup} onChanged={() => void refresh().catch(cause => setError(message(cause)))} onAssist={() => {
+            setView("overview");
+            prefill("Inspect this plugin's configuration and diagnose any connection problems. Report what needs to be changed before making changes.");
+          }} onToggle={(id, enabled) => void action("configuring", () => toggleMcp(id, enabled))} /> : null}
+          {!Object.keys(plugin.configuration ?? {}).length && !hasConnections ? <EmptyView label="No configuration" /> : null}
+        </>;
+      }
+      case "checks":
+        if (!draft?.path && installed) {
+          if (!installed.mcpServers?.length && !installed.connections.length) return <EmptyView label="No checks" />;
+          return <button type="button" className="plugin-detail-secondary" onClick={() => setView("configuration")}>Test connections<ChevronRight size={14} /></button>;
+        }
+        return <PluginChecks draft={draft} disabled={disabled} operation={operation} onTest={server => void action(`test:${server}`, async () => {
+          if (!draft?.revision) return;
+          await testPluginDraft(sessionId, server, draft.revision);
+          await refresh();
+        })} />;
+    }
   }
 
   const goToPlugins = () => { window.location.hash = settingsHash("plugins"); };
@@ -203,37 +253,14 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
               }}><Trash2 size={14} /></button> : null}
             {draftPlugin ? <button className="publish-button workspace-publish-button" type="button" disabled={disabled || Boolean(draft?.errors.length) || upToDate} onClick={() => void action("installing", async () => {
               if (!draft?.revision) return;
-              setState(await installPluginDraft(sessionId, draft.revision)); await refresh();
+              try { await installPluginDraft(sessionId, draft.revision); }
+              finally { await refresh(); }
             })}>{operation === "installing" ? <LoaderCircle className="spin" size={14} /> : upToDate ? <Check size={14} /> : <Package size={14} />}<span>{upToDate ? "Installed" : state?.pluginId ? "Update plugin" : "Install plugin"}</span></button> : null}
           </div>
         </header>
-        <div className={`plugin-builder-preview-content is-${view}`}>
-          {view === "overview" && draft?.errors.length ? <p className="plugin-builder-error" role="alert">{draft.errors.join(" ")}</p> : null}
-          {view === "overview" ? plugin ? <PluginOverview plugin={plugin} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} /> : <EmptyView label="No draft" /> : null}
-          {view === "files" ? <PluginFiles sessionId={sessionId} draft={draft} installed={installed} request={fileRequest} /> : null}
-          {view === "configuration" ? plugin ? <>
-            <fieldset className="plugin-builder-config" disabled={disabled}>
-              <PluginConfigurationPanel key={`${sessionId}:${draft?.revision ?? plugin.id}`} plugin={plugin} setupId={draftPlugin ? sessionId : undefined} compact onChanged={() => void refresh().catch(cause => setError(message(cause)))} />
-            </fieldset>
-            {!draftPlugin && installed ? <PluginMcpPanel plugin={installed} onChanged={() => void refresh().catch(cause => setError(message(cause)))} onAssist={() => { setView("overview"); prefill("Inspect this plugin's configuration and diagnose any connection problems. Report what needs to be changed before making changes."); }} onToggle={(id, enabled) => void action("configuring", async () => {
-              const components = Object.fromEntries([
-                ...installed.skills.map(skill => [pluginComponentKey("skill", skill.id), skill.enabled]),
-                ...(installed.mcpServers ?? []).map(server => [pluginComponentKey("mcp", server.id), server.enabled]),
-              ]);
-              await updatePluginSettings(installed.id, { enabled: installed.enabled, components: { ...components, [pluginComponentKey("mcp", id)]: enabled } });
-              await refresh();
-            })} /> : null}
-            {!Object.keys(plugin.configuration ?? {}).length && !(!draftPlugin && installed && (installed.mcpServers?.length || installed.connections.length)) ? <EmptyView label="No configuration" /> : null}
-          </> : <EmptyView label="No configuration" /> : null}
-          {view === "checks" ? !draft?.path && installed ? installed.mcpServers?.length || installed.connections.length ? <button type="button" className="plugin-detail-secondary" onClick={() => setView("configuration")}>Test connections<ChevronRight size={14} /></button> : <EmptyView label="No checks" /> : <PluginChecks draft={draft} disabled={disabled} operation={operation} onTest={server => void action(`test:${server}`, async () => {
-            if (!draft?.revision) return;
-            await testPluginDraft(sessionId, server, draft.revision); await refresh();
-          })} /> : null}
-        </div>
+        <div className={`plugin-builder-preview-content is-${view}`}>{previewContent()}</div>
       </section>
   </WorkspaceShell>;
-  // File selections from the chat share the same preview as the file browser.
-  function setFileRequest(file: string) { updateFileRequest({ path: file, id: Date.now() }); }
 }
 
 function PluginOverview({ plugin, onChooseView, onChooseFile }: {

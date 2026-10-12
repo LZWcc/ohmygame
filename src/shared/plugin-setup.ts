@@ -1,9 +1,5 @@
 import type { AgentModelRef, AgentReasoningLevel, Turn } from "./contracts.js";
 import type { PluginDetail, PluginMcpResult } from "./plugins.js";
-export interface PluginSetupMessage {
-  role: "user" | "assistant";
-  text: string;
-}
 export interface PluginSetupSummary {
   id: string;
   pluginId?: string;
@@ -15,10 +11,8 @@ export interface PluginSetupSummary {
   reasoningLevel?: AgentReasoningLevel;
 }
 export interface PluginSetupState extends PluginSetupSummary {
-  messages: PluginSetupMessage[];
   turns: Turn[];
   busy: boolean;
-  activity?: string;
   error?: string;
 }
 export interface PluginSetupPrompt {
