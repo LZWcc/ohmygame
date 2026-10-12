@@ -159,7 +159,6 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
         <div className="timeline" aria-live="polite">
           {!state && !error ? <p className="plugin-builder-working" role="status"><LoaderCircle className="spin" size={13} />Opening your workspace…</p> : null}
           {state ? <AgentTimeline turns={state.turns} onAddToChat={prefill} onOpenWorkspaceFile={file => { setView("files"); setFileRequest(file); }} /> : null}
-          {state?.busy && !state.turns.some(turn => turn.items.some(item => item.type === "agentMessage" && item.status === "inProgress")) ? <p className="plugin-builder-working" role="status"><LoaderCircle className="spin" size={13} />{activityLabel(state.activity)}</p> : null}
           {state?.status === "interrupted" ? <p className="plugin-builder-notice" role="status">This run was interrupted. Your conversation and files are saved; send a message to continue.</p> : null}
         </div>
         <div className="composer">
@@ -299,8 +298,5 @@ function EmptyView({ label }: { label: string }) {
 }
 function statusLabel(status: PluginSetupSummary["status"]): string {
   return { idle: "Ready to build", working: "Building…", ready: "Draft ready to review", installed: "Installed", interrupted: "Run interrupted", error: "Needs attention" }[status];
-}
-function activityLabel(activity?: string): string {
-  return { read: "Reading plugin files…", write: "Writing plugin files…", edit: "Updating plugin files…", bash: "Working in the plugin workspace…", plugin_manage: "Preparing the plugin…" }[activity ?? ""] ?? "Working on your plugin…";
 }
 function message(cause: unknown): string { return cause instanceof Error ? cause.message : String(cause); }
