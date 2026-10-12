@@ -1,7 +1,7 @@
-import { ArrowDownToLine, Gamepad2, Globe2, MoreHorizontal, RefreshCw, UserRound, Wrench } from "./icons.js";
+import { ArrowDownToLine, Gamepad2, Globe2, InfoCircle, MoreHorizontal, RefreshCw, UserRound, Wrench } from "./icons.js";
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useAuth } from "./auth.js";
-import type { AppNavigationTarget, SidebarPage } from "./routes.js";
+import { settingsHash, type AppNavigationTarget, type SidebarPage } from "./routes.js";
 import { UserAvatar } from "./user-avatar.js";
 import type { DesktopUpdateState } from "../shared/desktop-update.js";
 import brandMark from "../shared/assets/ohmygame-mark-v2.svg";
@@ -65,7 +65,9 @@ export function AppSidebar({ active, onNavigate }: AppSidebarProps) {
     ? { label: "Update", icon: <ArrowDownToLine size={15} />, action: () => void window.ohMyGameDesktop?.updates.download() }
     : updateStatus === "ready"
       ? { label: "Restart", icon: <RefreshCw size={14} />, action: () => void window.ohMyGameDesktop?.updates.install() }
-      : undefined;
+      : updateStatus === "error"
+        ? { label: "Issue", icon: <InfoCircle size={15} />, action: () => { window.location.hash = settingsHash("about"); } }
+        : undefined;
 
   const updatePercent = updateStatus === "downloading" ? update!.status.percent : undefined;
   const updateButton = updateAction ? (
