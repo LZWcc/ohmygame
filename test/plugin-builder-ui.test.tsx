@@ -24,6 +24,9 @@ let container: HTMLDivElement;
 let installed: boolean;
 let installationFailed: boolean;
 let requests: string[];
+let draftIcon: PluginDetail["icon"];
+let iconChanged: boolean;
+let savedIcon: unknown;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   localStorage.clear();
@@ -31,10 +34,16 @@ beforeEach(() => {
   installed = true;
   installationFailed = false;
   requests = [];
+  draftIcon = undefined; iconChanged = false; savedIcon = undefined;
   vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit = {}) => {
     const route = new URL(url, "http://localhost").pathname.replace(/^\/api/, "");
     const method = init.method ?? "GET";
     requests.push(`${method} ${route}`);
+    if (route === `/plugins/setup-sessions/${sessionId}/icon` && method === "PUT") {
+      const input = JSON.parse(String(init.body)); savedIcon = input;
+      draftIcon = input.icon ?? undefined; iconChanged = true;
+      return Response.json({ plugin: { ...plugin, icon: draftIcon }, revision: "b".repeat(64), files: [], errors: [] });
+    }
     if (route === "/health") return Response.json({ status: "ok" });
     if (route === "/models") return Response.json({ models: [], providers: [] });
     if (route === `/plugins/setup-sessions/${sessionId}/install` && method === "POST") {
@@ -48,7 +57,7 @@ beforeEach(() => {
       return new Response(null, { status: 204 });
     }
     if (route === `/plugins/setup-sessions/${sessionId}`) return Response.json(installationFailed ? { ...state, status: "error", error: "Configuration could not be saved" } : installed ? state : { ...state, pluginId: undefined, status: "ready" });
-    if (route === `/plugins/setup-sessions/${sessionId}/draft`) return Response.json({ path: "review", revision, installedRevision: installed && !installationFailed ? revision : undefined, plugin: { ...plugin, installed: false }, files: [], errors: [] });
+    if (route === `/plugins/setup-sessions/${sessionId}/draft`) return Response.json({ path: "review", revision: iconChanged ? "b".repeat(64) : revision, installedRevision: installed && !installationFailed ? revision : undefined, plugin: { ...plugin, installed: false, icon: draftIcon }, files: [], errors: [] });
     if (route === `/plugins/${encodeURIComponent(plugin.id)}`) return Response.json(plugin);
     throw new Error(`Unexpected request: ${route}`);
   }));
@@ -105,5 +114,62 @@ describe("Plugin Builder removal controls", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toContain("Configuration could not be saved");
     const retry = [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Update plugin");
     expect(retry?.disabled).toBe(false);
+  });
+});
+
+
+describe("Plugin Builder icons", () => {
+  const input = (label: string) => document.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;
+  const modalButton = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(element => element.textContent === text)!;
+  async function fill(element: HTMLInputElement, value: string) {
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); });
+  }
+  it("searches presets, validates entered IDs and makes the changed draft updateable", async () => {
+    await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));
+    await act(async () => button("Change plugin icon").click());
+    await fill(input("Search icons"), "音乐");
+    expect(document.querySelectorAll(".plugin-icon-grid button")).toHaveLength(1);
+    await fill(input("Preset ID"), "invented");
+    expect(modalButton("Save icon").disabled).toBe(true);
+    await fill(input("Preset ID"), "music");
+    expect(modalButton("Save icon").disabled).toBe(false);
+    await act(async () => modalButton("Save icon").click());
+    expect(savedIcon).toEqual({ revision, icon: { type: "preset", id: "music" } });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect([...container.querySelectorAll<HTMLButtonElement>("button")].find(element => element.textContent === "Update plugin")?.disabled).toBe(false);
+  });
+  it("validates package paths and restores the default icon", async () => {
+    await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));
+    await act(async () => button("Change plugin icon").click());
+    await act(async () => modalButton("Package image").click());
+    await fill(input("Plugin icon path"), "https://example.com/logo.png");
+    expect(modalButton("Save icon").disabled).toBe(true);
+    await fill(input("Plugin icon path"), "./assets/logo.png");
+    expect(modalButton("Save icon").disabled).toBe(false);
+    await act(async () => modalButton("Use default").click());
+    expect(savedIcon).toEqual({ revision, icon: null });
+  });
+  it("uploads a chosen image without reusing the controlled preset input", async () => {
+    const createUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:icon-preview");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));
+    await act(async () => button("Change plugin icon").click());
+    await act(async () => modalButton("Upload image").click());
+    const file = new File(["test-image"], "logo.webp", { type: "image/webp" });
+    await act(async () => { Object.defineProperty(input("Plugin icon image"), "files", { value: [file] }); input("Plugin icon image").dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(createUrl).toHaveBeenCalledWith(file);
+    await act(async () => { modalButton("Save icon").click(); await vi.waitFor(() => expect(savedIcon).toBeDefined()); });
+    expect(savedIcon).toEqual({ revision, image: { mediaType: "image/webp", data: btoa("test-image") } });
+    expect(log.mock.calls.flat().join(" ")).not.toContain("controlled input");
+  });
+
+  it("closes on Escape and returns focus to the edit button", async () => {
+    await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));
+    button("Change plugin icon").focus();
+    await act(async () => button("Change plugin icon").click());
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(button("Change plugin icon"));
   });
 });

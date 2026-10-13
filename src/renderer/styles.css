@@ -5863,6 +5863,11 @@ button.home-nav-item-active:hover {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
+.plugin-icon-image {
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
+}
 
 .plugin-row-copy {
   display: grid;

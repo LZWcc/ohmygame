@@ -5,7 +5,9 @@ import { pluginComponentKey } from "../shared/plugins.js";
 import { preferredAgentModel } from "../shared/agent-models.js";
 import { clampReasoningLevel } from "../shared/reasoning.js";
 import { abortPluginSetup, deletePluginSetup, installPluginDraft, listPluginSetups, promptPluginSetup, readPluginDraft,
-  readPluginDraftFile, readPluginSetup, readPlugin, readPluginSkill, testPluginDraft, uninstallPlugin, updatePluginSettings, waitForRuntime } from "./api.js";
+  readPluginDraftFile, readPluginSetup, readPlugin, readPluginSkill, testPluginDraft, uninstallPlugin, updatePluginSettings, updatePluginDraftIcon, waitForRuntime } from "./api.js";
+import { PluginIcon } from "./plugin-icons.js";
+import { PluginIconPicker } from "./plugin-icon-picker.js";
 import { AgentTimeline } from "./agent-timeline.js";
 import { useAgentModels } from "./model-selector.js";
 import { PromptBox } from "./prompt-box.js";
@@ -67,6 +69,7 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   const { state, draft, installed } = snapshot ?? {};
   const [input, setInput] = useState(() => readPluginBuilderInput(sessionId, typeof window === "undefined" ? undefined : window.localStorage));
   const [view, setView] = useState<BuilderView>("overview");
+  const [iconEditing, setIconEditing] = useState(false);
   const [error, setError] = useState<string>();
   const [operation, setOperation] = useState<string>();
   const [retry, setRetry] = useState(0);
@@ -159,7 +162,12 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
       case "overview":
         return <>
           {draft?.errors.length ? <p className="plugin-builder-error" role="alert">{draft.errors.join(" ")}</p> : null}
-          {plugin ? <PluginOverview plugin={plugin} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} /> : <EmptyView label="No draft" />}
+          {plugin ? <PluginOverview plugin={plugin} setupId={draftPlugin ? sessionId : undefined} disabled={disabled} onEditIcon={draftPlugin && !draft?.errors.length ? () => setIconEditing(true) : undefined} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} /> : <EmptyView label="No draft" />}
+          {iconEditing && draftPlugin && draft?.revision ? <PluginIconPicker plugin={draftPlugin} setupId={sessionId} files={draft.files} disabled={disabled} onClose={() => setIconEditing(false)} onSave={async change => {
+            setOperation("saving-icon");
+            try { await updatePluginDraftIcon(sessionId, { ...change, revision: draft.revision! }); await refresh(); }
+            finally { setOperation(undefined); }
+          }} /> : null}
         </>;
       case "files":
         return <PluginFiles sessionId={sessionId} draft={draft} installed={installed} request={fileRequest} />;
@@ -263,11 +271,11 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
   </WorkspaceShell>;
 }
 
-function PluginOverview({ plugin, onChooseView, onChooseFile }: {
-  plugin: PluginDetail; onChooseView: (view: BuilderView) => void; onChooseFile: (file: string) => void;
+function PluginOverview({ plugin, setupId, disabled, onEditIcon, onChooseView, onChooseFile }: {
+  plugin: PluginDetail; setupId?: string; disabled: boolean; onEditIcon?: () => void; onChooseView: (view: BuilderView) => void; onChooseFile: (file: string) => void;
 }) {
   return <div className="plugin-builder-overview">
-    <div className="plugin-builder-overview-heading"><h2>{plugin.displayName}</h2>{plugin.version ? <small>v{plugin.version}</small> : null}</div>
+    <div className="plugin-builder-overview-heading">{onEditIcon ? <button className="plugin-builder-icon-button" type="button" aria-label="Change plugin icon" title="Change plugin icon" disabled={disabled} onClick={onEditIcon}><PluginIcon plugin={plugin} setupId={setupId} /></button> : <PluginIcon plugin={plugin} setupId={setupId} />}<h2>{plugin.displayName}</h2>{plugin.version ? <small>v{plugin.version}</small> : null}</div>
     {plugin.description ? <p className="plugin-builder-description">{plugin.description}</p> : null}
     {plugin.skills.length ? <section><div className="plugin-builder-section-heading"><h3>Skills</h3><span>{plugin.skills.length}</span></div>{plugin.skills.map(skill => <button className="plugin-builder-component" type="button" key={skill.id} title={skill.description} onClick={() => onChooseFile(skill.id)}><FileText size={15} /><strong>{skill.name}</strong><ChevronRight size={14} /></button>)}</section> : null}
     {plugin.mcpServers?.length ? <section><div className="plugin-builder-section-heading"><h3>MCP services</h3><span>{plugin.mcpServers.length}</span></div>{plugin.mcpServers.map(server => <button className="plugin-builder-component" type="button" key={server.id} onClick={() => onChooseView("checks")}><Plug size={15} /><strong>{server.name}</strong><ChevronRight size={14} /></button>)}</section> : null}

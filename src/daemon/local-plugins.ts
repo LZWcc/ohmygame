@@ -18,6 +18,7 @@ import {
   type PluginSource,
 } from "../shared/plugins.js";
 import { parseSkillMetadata } from "./skill-metadata.js";
+import { readPluginIconAsset } from "./plugin-icons.js";
 
 const MAX_PLUGIN_DEPTH = 64;
 
@@ -277,6 +278,9 @@ export async function inspectPluginBundle(
 ): Promise<PluginDetail> {
   await validatePluginBundle(pluginRoot);
   const manifest = normalizedManifest ?? await readPluginManifest(pluginRoot);
+  const iconAsset = await readPluginIconAsset(pluginRoot, manifest.interface?.icon).catch(cause => {
+    throw new LocalPluginError(`Plugin icon: ${errorMessage(cause)}`);
+  });
   const skills = manifest.skills
     ? (await Promise.all((Array.isArray(manifest.skills) ? manifest.skills : [manifest.skills]).map((skillPath) => skillComponents(pluginRoot, skillPath)))).flat()
     : [];
@@ -290,6 +294,8 @@ export async function inspectPluginBundle(
     displayName: manifest.interface?.displayName ?? displayName(manifest.name),
     description: manifest.interface?.shortDescription ?? manifest.description,
     longDescription: manifest.interface?.longDescription,
+    icon: manifest.interface?.icon,
+    iconRevision: iconAsset?.revision,
     version: manifest.version,
     marketplace: identity.marketplace,
     source: identity.source,
