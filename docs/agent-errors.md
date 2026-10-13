@@ -78,6 +78,10 @@ reload validates stored or imported session data as well as current messages.
 upgrading Pi, check whether the new version preserves these fields before
 removing or adapting the patch. Prefer an upstream implementation of the shared
 failure diagnostic helper and adapter hooks over a permanent fork.
+Every Pi upgrade must also recheck the WebSocket retry classifier: authoritative
+authentication, quota and invalid-request failures remain non-retryable, ordinary
+429 rate limits and transient provider failures remain retryable, and context
+overflow still enters compaction. Keep these checks after a clean dependency install.
 
 Run `test/provider-error-diagnostics.test.ts` to exercise real Pi adapters with
 offline fetch fixtures, and the agent error, agent manager and timeline tests to

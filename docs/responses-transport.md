@@ -12,6 +12,8 @@ Responses providers. Choices are saved with other provider preferences in
 `model-visibility.json` under `responsesTransports`, and apply to the next model
 request in existing sessions. Provider deletion uses the same transaction as
 other provider preferences; no separate transport settings file needs cleanup.
+Invalid optional transport preferences are ignored on load without discarding
+other provider settings. Invalid modes are still rejected when saving through the API.
 
 | Choice           | Behavior                                                                                 |
 | ---------------- | ---------------------------------------------------------------------------------------- |
@@ -24,6 +26,9 @@ existing transports. A relay must be configured with the Responses API to use
 this WebSocket path; the model name alone does not select transport.
 WebSocket URLs and headers derive from the actual request endpoint and credentials.
 Official Files capabilities are restricted to the exact official endpoint.
+Relay requests that select SSE keep the existing inline-image fetch path,
+including redirect behavior and forwarding encoded request bodies. Only relays
+that select WebSocket enter the session transport and its SSE recovery path.
 
 ## Failure handling
 

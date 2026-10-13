@@ -42,9 +42,9 @@ export class ProviderModelSettingsStore {
     if (stored.disabled !== undefined && (!Array.isArray(stored.disabled) || stored.disabled.some((id) => typeof id !== "string"))) throw new Error("Invalid disabled providers");
     if (stored.customProviders !== undefined && (!isObject(stored.customProviders) || Object.values(stored.customProviders).some((item) => !isObject(item) || !["api_key", "none"].includes(String(item.authentication))))) throw new Error("Invalid custom providers");
     this.#disabled = (stored.disabled ?? []) as string[];
-    if (stored.responsesTransports !== undefined && (!isObject(stored.responsesTransports)
-      || Object.values(stored.responsesTransports).some((mode) => !RESPONSES_TRANSPORT_MODES.includes(mode as ResponsesTransportMode)))) throw new Error("Invalid Responses transport settings");
-    this.#responsesTransports = (stored.responsesTransports ?? {}) as Record<string, ResponsesTransportMode>;
+    // An invalid optional transport preference must not hide all provider settings.
+    this.#responsesTransports = Object.fromEntries(Object.entries(isObject(stored.responsesTransports) ? stored.responsesTransports : {})
+      .filter(([, mode]) => RESPONSES_TRANSPORT_MODES.includes(mode as ResponsesTransportMode))) as Record<string, ResponsesTransportMode>;
     this.#customProviders = (stored.customProviders ?? {}) as CustomProviderRegistry;
     if (stored.nativeModels3D !== undefined) {
       if (!isObject(stored.nativeModels3D)) throw new Error("Invalid native 3D models");

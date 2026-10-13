@@ -4,7 +4,7 @@ import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-respo
 import { createGrammarToolInputProperties } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { getDeclaredTools, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { isDeepSeekFileModel } from "./deepseek-image-files.js";
-import { prefersResponsesWebSocket, OpenAISessionTransport } from "./openai-session-transport.js";
+import { isOfficialOpenAIResponses, prefersResponsesWebSocket, OpenAISessionTransport } from "./openai-session-transport.js";
 import type { ResponsesTransportMode } from "../shared/contracts.js";
 import { OpenAISessionFiles } from "./openai-session-files.js";
 import { SessionImages, localImageError, ImageBudgetError, MODEL_REQUEST_HIGH_BYTES } from "./session-images.js";
@@ -69,10 +69,14 @@ export function installSessionImageRequests(session: AgentSession, images: Sessi
     const openai = model.api === "openai-responses";
     const endpoint = `${model.baseUrl.replace(/\/$/, "")}/responses`;
     const mode = transportMode(model.provider);
+    const useTransport = openai && (isOfficialOpenAIResponses(endpoint)
+      || prefersResponsesWebSocket(endpoint, { mode, transport: options?.transport }));
+    // Relay SSE retains Pi's existing redirect and encoded-body handling.
+    if (openai && !useTransport) transport.dispose();
     if (isDeepSeekFileModel(model)) return stream(model, context, options);
     const prepared = await images.prepare(context, model, session.settingsManager.getImageAutoResize());
     const delegate = options?.fetch ?? globalThis.fetch;
-    const fetch = openai ? transport.wrapFetch(delegate, {
+    const fetch = useTransport ? transport.wrapFetch(delegate, {
       endpoint, mode,
       transport: options?.transport,
       cacheRetention: options?.cacheRetention,
@@ -90,7 +94,7 @@ export function installSessionImageRequests(session: AgentSession, images: Sessi
     const events = await stream(model, prepared, {
       ...options, fetch, onPayload,
     });
-    if (openai) {
+    if (useTransport) {
       // Use exactly Pi's assistant serialization, including signatures, IDs and grammar tools.
       // Only a successfully parsed terminal message becomes a continuation baseline.
       void events.result().then((message) => {

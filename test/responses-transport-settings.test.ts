@@ -67,20 +67,41 @@ describe("Responses transport settings", () => {
     ).not.toHaveProperty("relay");
   });
 
-  it("rejects invalid persisted modes instead of silently changing transport", async () => {
-    const dir = await directory();
-    await writeFile(
-      path.join(dir, "model-visibility.json"),
-      JSON.stringify({
-        version: 1,
-        hidden: {},
-        responsesTransports: { openai: "unknown" },
-      }),
-    );
-    await expect(
-      new ProviderModelSettingsStore(dir, dir).load(),
-    ).rejects.toThrow("Invalid Responses transport settings");
-  });
+  it.each([
+    null,
+    [],
+    "invalid",
+    { openai: "unknown", relay: "sse", websocket: "websocket" },
+  ])(
+    "ignores invalid optional transport preferences without losing provider settings: %j",
+    async (responsesTransports) => {
+      const dir = await directory();
+      await writeFile(
+        path.join(dir, "model-visibility.json"),
+        JSON.stringify({
+          version: 1,
+          hidden: { openai: ["hidden-model"] },
+          disabled: ["anthropic"],
+          responsesTransports,
+        }),
+      );
+      const store = new ProviderModelSettingsStore(dir, dir);
+      await store.load();
+      expect(store.responsesTransport("openai")).toBe("auto");
+      expect(store.isVisible({ provider: "openai", id: "hidden-model" })).toBe(
+        false,
+      );
+      expect(store.isEnabled("anthropic")).toBe(false);
+      if (
+        responsesTransports &&
+        !Array.isArray(responsesTransports) &&
+        typeof responsesTransports === "object"
+      ) {
+        expect(store.responsesTransport("relay")).toBe("sse");
+        expect(store.responsesTransport("websocket")).toBe("websocket");
+      }
+    },
+  );
 
   it("validates the API, supports Responses relays without models, restores choices after restart and clears deleted providers", async () => {
     const dir = await directory();

@@ -1,9 +1,11 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { createServer } from "node:http";
+import { gzipSync } from "node:zlib";
 import sharp from "sharp";
 import { Type } from "typebox";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenAISessionTransport, type ResponseSocket } from "../src/daemon/openai-session-transport.js";
 import { OpenAISessionFiles } from "../src/daemon/openai-session-files.js";
@@ -38,7 +40,10 @@ class PiSocket extends EventTarget implements ResponseSocket {
   }
   close() { this.readyState = 3; this.dispatchEvent(new Event("close")); }
 }
-async function fixture(provider = "openai", baseUrl?: string, api = "openai-responses", setupSocket?: (socket: PiSocket) => void, tools: ToolDefinition[] = [], transportMode?: (provider: string) => ResponsesTransportMode) {
+async function fixture(provider = "openai", baseUrl?: string, api = "openai-responses", setupSocket?: (socket: PiSocket) => void, tools: ToolDefinition[] = [], options: {
+  transportMode?: (provider: string) => ResponsesTransportMode;
+  onStream?: (options: Parameters<AgentSession["agent"]["streamFunction"]>[2]) => void;
+} = {}) {
   const dir = await mkdtemp(path.join(tmpdir(), "ohmygame-image-requests-")); cleanup.push(() => rm(dir, { recursive: true, force: true }));
   const runtime = await ModelRuntime.create({ authPath: path.join(dir, "auth.json"), modelsPath: null, refreshOnCreate: false });
   await runtime.setRuntimeApiKey(provider, "test-subscription");
@@ -51,9 +56,16 @@ async function fixture(provider = "openai", baseUrl?: string, api = "openai-resp
   const images = new SessionImages(manager, dir);
   const { session } = await createAgentSession({ cwd: dir, agentDir: dir, modelRuntime: runtime, model, resourceLoader: loader, settingsManager: settings, sessionManager: manager, customTools: [images.recallTool, ...tools] });
   cleanup.push(() => session.dispose());
+  if (options.onStream) {
+    const stream = session.agent.streamFunction;
+    session.agent.streamFunction = (model, context, streamOptions) => {
+      options.onStream?.(streamOptions);
+      return stream(model, context, streamOptions);
+    };
+  }
   const sockets: PiSocket[] = [];
   const transport = new OpenAISessionTransport(images, new OpenAISessionFiles(dir), () => { const socket = new PiSocket(); setupSocket?.(socket); sockets.push(socket); return socket; });
-  installSessionImageRequests(session, images, dir, { transport, transportMode });
+  installSessionImageRequests(session, images, dir, { transport, transportMode: options.transportMode });
   return { session, manager, settings, sockets, dir, images, transport };
 }
 
@@ -126,7 +138,7 @@ describe("Pi session image request integration", () => {
   it("applies provider transport changes to an existing session's next request", async () => {
     let mode: ResponsesTransportMode = "auto";
     const resolveMode = vi.fn(() => mode);
-    const { session, sockets, settings } = await fixture("openai", "https://relay.example/v1", "openai-responses", undefined, [], resolveMode);
+    const { session, sockets, settings } = await fixture("openai", "https://relay.example/v1", "openai-responses", undefined, [], { transportMode: resolveMode });
     const network = vi.fn<typeof fetch>(async () => sse(completed())); vi.stubGlobal("fetch", network);
     await session.prompt("Default relay request");
     expect(sockets).toHaveLength(0); expect(network).toHaveBeenCalledOnce();
@@ -152,6 +164,52 @@ describe("Pi session image request integration", () => {
     const network = vi.fn<typeof fetch>(async () => sse(completed())); vi.stubGlobal("fetch", network);
     await session.prompt("Use SSE");
     expect(network).toHaveBeenCalledOnce(); expect(sockets).toHaveLength(0);
+  });
+
+  it.each([301, 307, 308].flatMap((status) => (["auto", "sse", "websocket"] as const).map((mode) => ({ status, mode }))))(
+    "preserves relay HTTP redirects for $mode requests after status $status", async ({ status, mode }) => {
+      const paths: string[] = [];
+      const server = createServer((request, response) => {
+        paths.push(request.url!);
+        request.resume();
+        if (request.url === "/v1/responses") {
+          response.writeHead(status, { location: "/v1/responses/" }); response.end();
+        } else {
+          response.writeHead(200, { "content-type": "text/event-stream" });
+          response.end(`data: ${JSON.stringify(completed())}\n\n`);
+        }
+      });
+      await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+      cleanup.push(() => new Promise<void>((resolve, reject) => { server.close((error) => error ? reject(error) : resolve()); server.closeAllConnections(); }));
+      const address = server.address() as { port: number };
+      const { session, sockets } = await fixture("openai", `http://127.0.0.1:${address.port}/v1`, "openai-responses", (socket) => {
+        socket.send = () => queueMicrotask(() => socket.close());
+      }, [], { transportMode: () => mode });
+      await session.prompt("Follow the relay redirect");
+      expect(paths).toEqual(["/v1/responses", "/v1/responses/"]);
+      expect(session.messages.findLast((message) => message.role === "assistant")).toMatchObject({ stopReason: "stop" });
+      expect(sockets).toHaveLength(mode === "websocket" ? 1 : 0);
+    },
+  );
+
+  it.each(["auto", "sse"] as const)("keeps encoded relay requests intact in %s mode", async (mode) => {
+    let wrappedFetch: typeof fetch | undefined;
+    const endpoint = "https://relay.example/v1/responses";
+    const { session, images, sockets } = await fixture("openai", "https://relay.example/v1", "openai-responses", undefined, [], {
+      transportMode: () => mode, onStream: (options) => { wrappedFetch = options?.fetch; },
+    });
+    const network = vi.fn<typeof fetch>(async () => sse(completed())); vi.stubGlobal("fetch", network);
+    await session.prompt("Capture the relay's final request boundary");
+    const budget = vi.spyOn(images, "budget");
+    const encoded = gzipSync(JSON.stringify({ input: [{ role: "user", content: "Encoded request" }] }));
+    const request = new Request(endpoint, { method: "POST", headers: { "content-type": "application/json", "content-encoding": "gzip" }, body: encoded });
+    await wrappedFetch!(request);
+    const sent = new Request(network.mock.calls[1][0], network.mock.calls[1][1]);
+    expect(sent.redirect).toBe("follow");
+    expect(sent.headers.get("content-encoding")).toBe("gzip");
+    expect(new Uint8Array(await sent.arrayBuffer())).toEqual(new Uint8Array(encoded));
+    expect(budget).not.toHaveBeenCalled();
+    expect(sockets).toHaveLength(0);
   });
 
   it.each(["error", "failed", "before-start"])("preserves Pi's retry for a transient provider %s event", async (kind) => {

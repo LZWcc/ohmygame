@@ -207,7 +207,8 @@ export class OpenAISessionTransport {
     // HTTP SIWC requires the required history; previous_response_id is connection-local only.
     const payload = { ...body }; delete payload.previous_response_id;
     const headers = new Headers(request.headers); headers.delete("content-length");
-    return new Request(request.url, { method: "POST", headers, body: JSON.stringify(payload), signal: request.signal, redirect: "error" });
+    return new Request(request.url, { method: "POST", headers, body: JSON.stringify(payload), signal: request.signal,
+      redirect: isOfficialOpenAIResponses(request.url) ? "error" : request.redirect });
   }
 
   private async connect(request: Request, timeoutMs: number): Promise<ResponseSocket> {

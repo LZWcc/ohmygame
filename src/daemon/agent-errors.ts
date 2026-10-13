@@ -102,7 +102,7 @@ function classifyAgentError(message: string, diagnostics: AgentErrorDiagnostics)
   if (/ECONNREFUSED/.test(codes) || /connection refused/i.test(transportText)) return "connection_refused";
   if (/TIMEOUT|ETIMEDOUT/.test(codes) || /timed? out|timeout/i.test(transportText)) return "timeout";
   if (/ECONNRESET|EPIPE|UND_ERR_SOCKET/.test(codes) || /socket hang up|other side closed/i.test(transportText)) return "connection_reset";
-  if (/WEBSOCKET_STREAM_INTERRUPTED|WEBSOCKET_CLOSE_/.test(codes) || /stream ended|ended without finish_reason|finish_reason: network_error|response interrupted after streaming began|WebSocket closed before completion/i.test(transportText)) return "stream_error";
+  if (/WEBSOCKET_CLOSE_/.test(codes) || /stream ended|ended without finish_reason|finish_reason: network_error|response interrupted after streaming began|WebSocket closed before completion/i.test(transportText)) return "stream_error";
   if (/connection.?error|network.?error|fetch failed/i.test(message)) return "network_error";
   return undefined;
 }

@@ -37,6 +37,16 @@ describe("patched Pi provider failures", () => {
     expect(isContextOverflow(message)).toBe(true);
   });
 
+  it.each([[429, "rate_limit_exceeded"], [503, "server_error"]])("keeps transient WebSocket provider status %s retryable", async (status, code) => {
+    const responseModel = { ...model, api: "openai-responses" as const, provider: "openai" };
+    const message = await responses(responseModel, context, { apiKey: "test-only", maxRetries: 0, fetch: async () => new Response(
+      JSON.stringify({ error: { code, message: "Please retry your request" } }),
+      { status, headers: { "content-type": "application/json", "x-ohmygame-response-transport": "websocket" } },
+    ) }).result();
+    expect(isRetryableAssistantError(message)).toBe(true);
+    expect(assistantMessageError(message).diagnostics).toMatchObject({ transport: "websocket", statusCode: status, errorCode: code });
+  });
+
   it.each(["ENOTFOUND", "ECONNREFUSED", "CERT_HAS_EXPIRED", "ECONNRESET"])("preserves %s through the actual DeepSeek adapter", async (code) => {
     const cause = new TypeError("fetch failed", { cause: Object.assign(new Error(`Synthetic ${code}`), { code }) });
     const message = await completions(model, context, { apiKey: "test-only", maxRetries: 0, fetch: async () => { throw cause; } }).result();
