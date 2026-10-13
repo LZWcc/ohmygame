@@ -2192,9 +2192,14 @@ const en = {
     uploadTypes: "Upload a PNG, JPEG, WebP, MP4, MOV, WebM, MP3, or WAV file.",
   },
   playtest: {
-    forgetTitle: "Forget which Scenes were seen, so the Story map starts over",
+    actions: "Playtest actions",
+    replay: "Replay Playtest",
+    popupBlocked: "Allow pop-ups to open Playtest.",
+    forgetTitle:
+      "Clear the Story map's explored Scenes and paths, keeping the saved game",
     forget: "Forget seen Scenes",
-    replayTitle: "Replay from the start with a new game",
+    replayTitle:
+      "Restart the Playtest window from its starting Scene with a new game; a regular start clears the saved game",
     addedToChat: "Added to the chat in the editor",
     broke: "Something broke",
     askFix: "Ask AI to fix",

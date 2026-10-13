@@ -329,13 +329,16 @@ saving, so the saved game is untouched.
 
 The Playtest window shows only the game. The author plays it as a player;
 reading the game's inner state is the Agent's work, not theirs. The editor's
-Playtest arrow menu holds **Replay**, which restarts from the session's starting
-Scene with a new game. A chosen start still leaves the saved game untouched.
-The same menu sits beside **Play from here** in the Workbench. These controls
-stay outside the game; desktop window controls and dragging use a native title
-bar outside the game surface. When something breaks, a short note says so
-and offers **Ask AI to fix**, which brings the
-editor forward on that Scene and fills the chat with where the player was,
+Playtest arrow menu holds **Replay Playtest**, which restarts the Playtest window
+from the session's starting Scene with a new game. For a regular Playtest from
+the project's Start Scene, this clears the saved game. A chosen start made with
+**Play from here** leaves the saved game untouched. The same menu sits beside
+**Play from here** in the Workbench and applies to the Playtest window with the
+same save behavior. The Workbench's separate **Replay** button only restarts
+that Scene's local preview. These controls stay outside the game; desktop
+window controls and dragging use a native title bar outside the game surface.
+When something breaks, a short note says so and offers **Ask AI to fix**, which
+brings the editor forward on that Scene and fills the chat with where the player was,
 the Exits they took, and the errors, ready to send.
 
 Playtest also remembers which Scenes the author has seen and which Exits

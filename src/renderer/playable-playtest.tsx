@@ -65,7 +65,7 @@ export function usePlaytestRequests(projectId: string, onRequest: (request: Play
 }
 
 /** Editor controls live outside the game, including when a Scene Workbench is open. */
-export function PlaytestControls({ disabled = false, busy = false, label = "Playtest", title = "Playtest in a new window", onOpen, onAction }: {
+export function PlaytestControls({ disabled = false, busy = false, label, title, onOpen, onAction }: {
   disabled?: boolean;
   busy?: boolean;
   label?: string;
@@ -112,19 +112,19 @@ export function PlaytestControls({ disabled = false, busy = false, label = "Play
   };
 
   return <div className="playable-playtest-controls" ref={root}>
-    <button className="icon-button pane-header-action" type="button" data-tooltip={busy ? "Opening playtest..." : title} aria-label={label} disabled={unavailable} onClick={onOpen}>
+    <button className="icon-button pane-header-action" type="button" data-tooltip={busy ? t("storyEditor.openingPlaytest") : title ?? t("storyEditor.playtestWindow")} aria-label={label ?? t("storyEditor.playtest")} disabled={unavailable} onClick={onOpen}>
       {busy ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}
     </button>
     {onAction ? <button
       ref={trigger} className="icon-button pane-header-action playable-playtest-menu-trigger" type="button"
-      title="Playtest actions" aria-label="Playtest actions" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
+      title={t("playtest.actions")} aria-label={t("playtest.actions")} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
       disabled={unavailable} onClick={() => setOpen((current) => !current)}
       onKeyDown={(event) => {
         if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
       }}
     ><ChevronDown size={11} /></button> : null}
     {open && !unavailable ? <div
-      ref={menu} className="playable-playtest-menu" id={menuId} role="menu" aria-label="Playtest actions"
+      ref={menu} className="playable-playtest-menu" id={menuId} role="menu" aria-label={t("playtest.actions")}
       onKeyDown={(event) => {
         if (event.key === "Tab") { setOpen(false); return; }
         if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -136,8 +136,8 @@ export function PlaytestControls({ disabled = false, busy = false, label = "Play
         items[index]?.focus();
       }}
     >
-      <button type="button" role="menuitem" title="Replay from the starting Scene with a new game" onClick={() => run("replay")}><RotateCcw size={14} /><span>Replay</span></button>
-      <button type="button" role="menuitem" title="Clear the Story map's explored Scenes and paths, keeping the saved game" onClick={() => run("forget-seen")}><History size={14} /><span>Forget seen Scenes</span></button>
+      <button type="button" role="menuitem" title={t("playtest.replayTitle")} onClick={() => run("replay")}><RotateCcw size={14} /><span>{t("playtest.replay")}</span></button>
+      <button type="button" role="menuitem" title={t("playtest.forgetTitle")} onClick={() => run("forget-seen")}><History size={14} /><span>{t("playtest.forget")}</span></button>
     </div> : null}
   </div>;
 }

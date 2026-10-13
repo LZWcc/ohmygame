@@ -887,20 +887,29 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
     if (!codebase || building || playtesting) return;
     setPlaytesting(true);
     if (request?.action !== "start") clearSelection();
+    const desktop = window.ohMyGameDesktop;
+    let playtest: Window | null = null;
+    let openedBlankWindow = false;
     try {
+      if (!desktop) {
+        // Open during the click's user activation, before waiting for a save.
+        playtest = window.open("", "ohmygame-playtest");
+        if (!playtest) throw new Error(t("playtest.popupBlocked"));
+        openedBlankWindow = playtest.location.href === "about:blank";
+      }
       await save(codebase);
+      if (playtest?.closed) return;
       if (request) requestPlaytest(projectId, request);
-      if (window.ohMyGameDesktop) {
-        await window.ohMyGameDesktop.openPlaytest(projectId, codebase.graph.viewport);
-      } else {
+      if (desktop) {
+        await desktop.openPlaytest(projectId, codebase.graph.viewport);
+      } else if (playtest) {
         const url = new URL(playtestHash(projectId), window.location.href).href;
-        const playtest = window.open("", "ohmygame-playtest");
-        if (!playtest) throw new Error("Allow pop-ups to open Playtest.");
         // Focusing an open Playtest must not reload it and lose a chosen start.
         if (playtest.location.href !== url) playtest.location.href = url;
         playtest.focus();
       }
     } catch (cause) {
+      if (openedBlankWindow) playtest?.close();
       setNotice(errorMessage(cause));
     } finally {
       setPlaytesting(false);

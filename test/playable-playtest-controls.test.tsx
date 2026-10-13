@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import path from "node:path";
+import i18next from "i18next";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -55,6 +56,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root.unmount());
+  await i18next.changeLanguage("en");
   container.remove();
   window.localStorage.clear();
   vi.unstubAllGlobals();
@@ -97,7 +99,7 @@ describe("editor Playtest controls", () => {
     const items =
       container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
     expect(Array.from(items, (item) => item.textContent)).toEqual([
-      "Replay",
+      "Replay Playtest",
       "Forget seen Scenes",
     ]);
     await act(async () => items[0]!.click());
@@ -111,6 +113,29 @@ describe("editor Playtest controls", () => {
         .click(),
     );
     expect(action).toHaveBeenLastCalledWith("forget-seen");
+  });
+
+  it("translates default controls, action titles, and the opening state into Chinese", async () => {
+    await i18next.changeLanguage("zh-CN");
+    await act(async () =>
+      root.render(<PlaytestControls onOpen={() => {}} onAction={() => {}} />),
+    );
+    expect(button("试玩").dataset.tooltip).toBe("在新窗口中试玩");
+    await act(async () => button("试玩操作").click());
+    const items =
+      container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]');
+    expect(Array.from(items, (item) => item.textContent)).toEqual([
+      "重新开始试玩",
+      "清除已看过的场景",
+    ]);
+    expect(items[0]!.title).toContain("常规试玩会清除已有存档");
+    expect(items[1]!.title).toContain("保留游戏存档");
+    await act(async () =>
+      root.render(
+        <PlaytestControls busy onOpen={() => {}} onAction={() => {}} />,
+      ),
+    );
+    expect(button("试玩").dataset.tooltip).toBe("正在打开试玩…");
   });
 
   it("supports keyboard navigation and closes on Escape, outside click, or losing focus to a frame", async () => {
