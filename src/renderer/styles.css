@@ -15338,3 +15338,12 @@ button {
 .provider-catalog-info summary { cursor: pointer; color: var(--text-faint); }
 .provider-catalog-info p { margin: 8px 0; }
 .provider-catalog-info a { display: inline-flex; align-items: center; gap: 4px; color: var(--text-secondary); }
+
+.openai-image-models form { display: grid; gap: 14px; }
+.openai-image-models .provider-models-controls { flex-wrap: wrap; }
+.openai-image-models .openai-image-template { width: auto; max-width: 220px; min-width: 0; font-size: 11px; }
+@media (max-width: 640px) {
+  .openai-image-models .provider-model-row { flex-wrap: wrap; }
+  .openai-image-models .provider-model-row > label { flex-basis: calc(100% - 32px); }
+  .openai-image-models .openai-image-template { max-width: none; flex: 1; }
+}

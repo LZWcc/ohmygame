@@ -45,6 +45,8 @@ import { ProjectAssetError, ProjectManager, ProjectLibraryReferenceError, Projec
 import { ExampleError, ExampleStore } from "./examples.js";
 import { ModelAuthError, ModelAuthManager } from "./model-auth.js";
 import { ModelEndpointSettingsStore } from "./model-endpoint-settings.js";
+import { OpenAIImageSettingsStore } from "./openai-image-settings.js";
+import { openAIImageConnection, registerOpenAIImageRoutes } from "./openai-image-routes.js";
 import { RESPONSES_TRANSPORT_MODES, type ResponsesTransportSettings } from "../shared/contracts.js";
 import { NetworkSettingsService } from "./network-settings.js";
 import type { NetworkSettings } from "../shared/network-settings.js";
@@ -592,6 +594,8 @@ export function createApp(options: AppOptions = {}) {
   const publishProjectRenamed = (project: ProjectState) => {
     events.publish(project.id, "project.renamed", { project });
   };
+  const openAIImages = new OpenAIImageSettingsStore(dataDirectory);
+  const imageConnection = openAIImageConnection(openAIImages, getModelRuntime);
   const modelAuth = new ModelAuthManager(getModelRuntime, {
     // Same ID Pi's own CLI uses, persisted in the agent directory's global settings.
     getDeviceId: () => SettingsManager.create(piAgentDirectory, piAgentDirectory).getOrCreateDeviceId(),
@@ -601,6 +605,7 @@ export function createApp(options: AppOptions = {}) {
     ? providerModelSettings.isEnabled("hyper3d") && providerModelSettings.isEnabled("cloud-hyper3d")
     : providerModelSettings.isEnabled(id);
   const providerImages = new ProviderImages(getModelRuntime, options.imageFetch, () => seedanceSettings.key("volcengine-ark"), providerEnabled, {
+    openAIConnection: () => imageConnection.resolve(),
     customProviders: () => providerModelSettings.customProviderCatalog(),
     migrateLegacyModels: (id, models) => providerModelSettings.migrateLegacyImageModels(id, models, async () => { await (await getModelRuntime()).refresh({ allowNetwork: false, providers: [id] }); }),
     defaultModel: () => providerModelSettings.defaultImageModel(),
@@ -779,7 +784,7 @@ export function createApp(options: AppOptions = {}) {
     await networkSettings.load();
     await Promise.all([library.load(), projects.load((projectDirectory, cause) => {
       app.log.warn({ err: cause, projectDirectory }, "Could not load project; skipped during startup");
-    }), tools.load(), pluginSettings.load(), pluginCapabilities.configuration.load(), bundledPlugins.load(), preinstalledPlugins.load(), webSearchSettings.load(), openAIEndpoint.load(), meshySettings.load(), tripoSettings.load(), hyper3dSettings.load(), seedanceSettings.load(), providerModelSettings.load()]);
+    }), tools.load(), pluginSettings.load(), pluginCapabilities.configuration.load(), bundledPlugins.load(), preinstalledPlugins.load(), webSearchSettings.load(), openAIEndpoint.load(), openAIImages.load(), meshySettings.load(), tripoSettings.load(), hyper3dSettings.load(), seedanceSettings.load(), providerModelSettings.load()]);
     for (const error of await preinstalledPlugins.seed(localPlugins)) app.log.warn(error);
     const examplesWarning = await examples.load();
     if (examplesWarning) app.log.warn(examplesWarning);
@@ -1918,12 +1923,17 @@ export function createApp(options: AppOptions = {}) {
     const providers = piProviders
       .map((provider) => {
         const custom = customModels.get(provider.id);
+        const image = openAIImages.get();
+        const imageConfigured = provider.id === "openai" && (image.mode === "separate" ? image.configured : image.mode === "connection" && provider.configured && provider.credentialType !== "oauth");
+        const configured = provider.configured || imageConfigured;
         return {
           ...provider,
+          configured,
+          ...(provider.id === "openai" ? { languageConfigured: provider.configured, imageConfigured } : {}),
           enabled: providerEnabled(provider.id),
           custom: providerModelSettings.isCustom(provider.id),
           ...(custom?.preset ? { preset: custom.preset } : {}),
-          status: provider.configured ? "connected" as const : "not_configured" as const,
+          status: configured ? "connected" as const : "not_configured" as const,
           capabilities: custom?.modelConfigurationVersion === 2
             ? [...new Set(custom.models.flatMap(modelUsageList))]
             : provider.id === "openrouter"
@@ -1955,6 +1965,7 @@ export function createApp(options: AppOptions = {}) {
     return [...providers, ...directProviders, ...await cloudModels.providers(providerEnabled)].sort((left, right) => left.name.localeCompare(right.name));
   };
   app.get("/settings/providers", providerSummaries);
+  registerOpenAIImageRoutes(app, openAIImages, imageConnection, options.modelDiscoveryFetch);
   app.put<{ Body: { accessToken: string; userId: string } | null }>("/cloud/session", {
     schema: { body: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["accessToken", "userId"], properties: {
       accessToken: { type: "string", minLength: 1, maxLength: 16_384 }, userId: { type: "string", minLength: 1, maxLength: 128 },
@@ -2052,6 +2063,7 @@ export function createApp(options: AppOptions = {}) {
         else if (seedance) await seedanceSettings.clear(providerId);
         else await runtime.logout(providerId);
         await syncOpenAIEndpoint(runtime);
+        if (providerId === "openai") await openAIImages.clear(false);
       });
     } catch (cause) {
       if (previousEndpoint) await openAIEndpoint.update(previousEndpoint);

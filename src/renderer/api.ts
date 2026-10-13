@@ -21,6 +21,10 @@ import {
   type ModelAuthEvent,
   type ModelAuthMethod,
   type ModelProviderEndpointSettings,
+  type OpenAIImageConnectionSettings,
+  type SaveOpenAIImageConnectionRequest,
+  type DiscoverOpenAIImageModelsRequest,
+  type DiscoveredOpenAIImageModels,
   type ResponsesTransportSettings,
   type ResponsesTransportMode,
   type ProviderModelSettings,
@@ -244,6 +248,26 @@ export async function setProviderEnabled(providerId: string, enabled: boolean): 
   const result = await request<ProviderSummary>(`/settings/models/providers/${encodeURIComponent(providerId)}/enabled`, { method: "PATCH", body: JSON.stringify({ enabled }) });
   notifyAgentModelsChanged();
   return result;
+}
+
+export async function getOpenAIImageSettings(): Promise<OpenAIImageConnectionSettings> {
+  return request("/settings/models/providers/openai/images");
+}
+
+export async function saveOpenAIImageSettings(settings: SaveOpenAIImageConnectionRequest): Promise<OpenAIImageConnectionSettings> {
+  const saved = await request<OpenAIImageConnectionSettings>("/settings/models/providers/openai/images", { method: "PUT", body: JSON.stringify(settings) });
+  notifyAgentModelsChanged();
+  return saved;
+}
+
+export async function discoverOpenAIImageModels(settings: DiscoverOpenAIImageModelsRequest, signal?: AbortSignal): Promise<DiscoveredOpenAIImageModels> {
+  return request("/settings/models/providers/openai/images/discover", { method: "POST", body: JSON.stringify(settings), signal });
+}
+
+export async function removeOpenAIImageSettings(): Promise<OpenAIImageConnectionSettings> {
+  const saved = await request<OpenAIImageConnectionSettings>("/settings/models/providers/openai/images", { method: "DELETE" });
+  notifyAgentModelsChanged();
+  return saved;
 }
 
 export async function getCustomProvider(providerId: string): Promise<CustomProviderDetails> {
