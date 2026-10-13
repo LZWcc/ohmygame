@@ -277,7 +277,7 @@ const zhCN: typeof en = {
     low: "低",
     medium: "中",
     high: "高",
-    xhigh: "超高",
+    xhigh: "xhigh",
     max: "最高",
   },
   customProvider: {
@@ -581,7 +581,7 @@ const zhCN: typeof en = {
     none: "没有语言模型",
     textModel: "文本模型：{{name}}",
     textModelTitle: "文本模型：{{provider}} · {{name}}",
-    reasoningSuffix: " · 推理：{{level}}",
+    reasoning: "推理：{{level}}",
     model: "模型",
     manage: "管理服务商",
     noMatch: "没有匹配的模型",

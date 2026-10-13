@@ -279,7 +279,7 @@ const en = {
     low: "Low",
     medium: "Medium",
     high: "High",
-    xhigh: "Extra high",
+    xhigh: "xhigh",
     max: "Max",
   },
   customProvider: {
@@ -594,7 +594,7 @@ const en = {
     none: "No language model",
     textModel: "Text model: {{name}}",
     textModelTitle: "Text model: {{provider}} · {{name}}",
-    reasoningSuffix: " · Reasoning: {{level}}",
+    reasoning: "Reasoning: {{level}}",
     model: "Model",
     manage: "Manage providers",
     noMatch: "No matching models",
