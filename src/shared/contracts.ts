@@ -174,6 +174,10 @@ export interface ModelProviderEndpointSettings {
   baseUrl: string;
 }
 
+export const RESPONSES_TRANSPORT_MODES = ["auto", "sse", "websocket"] as const;
+export type ResponsesTransportMode = typeof RESPONSES_TRANSPORT_MODES[number];
+export interface ResponsesTransportSettings { mode: ResponsesTransportMode }
+
 export const CUSTOM_MODEL_APIS = ["openai-completions", "openai-responses", "anthropic-messages", "google-generative-ai", "google-vertex"] as const;
 export const CUSTOM_IMAGE_MODEL_APIS = ["openai-completions", "openai-responses"] as const;
 
@@ -306,6 +310,7 @@ export interface PublicationState {
 export type ProjectCoverMode = "auto" | "custom";
 
 export interface ProjectCoverState {
+  /** "custom" also freezes an automatic cover, or disables capture before a cover exists. */
   mode: ProjectCoverMode;
 }
 
@@ -532,6 +537,7 @@ export interface AgentErrorDiagnostics {
   model?: string;
   endpoint?: string;
   statusCode?: number;
+  transport?: "sse" | "websocket";
   requestId?: string;
   errorCode?: string;
   causes?: AgentErrorCause[];
