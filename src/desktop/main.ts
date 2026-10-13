@@ -67,7 +67,6 @@ let shutdown: Promise<void> | undefined;
 let updater: DesktopUpdater | undefined;
 const oauth = new OAuthCallbackFlow(() => mainWindow?.webContents.send("ohmygame:auth-callback"));
 const windowMenuLabels = new Set(["File", "Edit", "View", "Window"]);
-let applicationIconDataUrl: Promise<string> | undefined;
 
 async function stopServices(): Promise<void> {
   webGamePlayers.close();
@@ -164,11 +163,6 @@ handle("ohmygame:set-appearance", (event, appearance: unknown) => {
   if (process.platform === "win32" && senderWindow === mainWindow) {
     senderWindow.setTitleBarOverlay(windowsTitleBarOverlay(nativeTheme.shouldUseDarkColors));
   }
-});
-handle("ohmygame:window-menu-icon", async (event) => {
-  if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("Invalid window menu source");
-  applicationIconDataUrl ??= app.getFileIcon(process.execPath, { size: "small" }).then((icon) => icon.toDataURL());
-  return applicationIconDataUrl;
 });
 handle("ohmygame:popup-window-menu", (event, label: unknown, x: unknown, y: unknown) => {
   if (!mainWindow || event.sender !== mainWindow.webContents || typeof label !== "string" ||
