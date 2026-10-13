@@ -2,6 +2,7 @@ import { inspectPreviewConfiguration } from "./preview-configuration.js";
 import { validatePreviewSettings } from "../shared/preview-settings.js";
 import { previewPageUrl } from "../shared/preview-page.js";
 import { PluginSetupManager, registerPluginSetupRoutes } from "./plugin-setup.js";
+import { registerPluginIconRoutes } from "./plugin-icons.js";
 import { PluginCapabilities } from "./plugin-capabilities.js";
 import { registerPluginCapabilityRoutes } from "./plugin-capability-routes.js";
 import { isUtf8 } from "node:buffer";
@@ -764,6 +765,7 @@ export function createApp(options: AppOptions = {}) {
     return { runtime, model };
   });
   registerPluginSetupRoutes(app, pluginSetup);
+  registerPluginIconRoutes(app, [bundledPlugins, localPlugins]);
 
   app.addContentTypeParser("image/webp", { parseAs: "buffer", bodyLimit: MAX_PROJECT_COVER_BYTES }, (_request, body, done) => {
     done(null, body);
