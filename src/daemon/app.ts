@@ -45,6 +45,7 @@ import { ProjectAssetError, ProjectManager, ProjectLibraryReferenceError, Projec
 import { ExampleError, ExampleStore } from "./examples.js";
 import { ModelAuthError, ModelAuthManager } from "./model-auth.js";
 import { ModelEndpointSettingsStore } from "./model-endpoint-settings.js";
+import { RESPONSES_TRANSPORT_MODES, type ResponsesTransportSettings } from "../shared/contracts.js";
 import { NetworkSettingsService } from "./network-settings.js";
 import type { NetworkSettings } from "../shared/network-settings.js";
 import { normalizeCustomProvider, normalizeCustomProviderModel, ProviderModelSettingsStore } from "./provider-model-settings.js";
@@ -733,6 +734,7 @@ export function createApp(options: AppOptions = {}) {
         piAgentDirectory,
         () => resolvePluginSkills([bundledPlugins, localPlugins], pluginSettings, project.type),
         Object.keys(effectiveMcp.mcpServers).length ? { factory: await pluginCapabilities.host.extension(effectiveMcp), host: pluginCapabilities.host } : undefined,
+        (provider) => providerModelSettings.responsesTransport(provider),
       );
     }),
     activeToolNames: (project, mode, session) => {
@@ -2086,6 +2088,24 @@ export function createApp(options: AppOptions = {}) {
   });
 
   app.get("/settings/models/providers/openai/endpoint", async () => openAIEndpoint.get());
+
+  const supportsResponsesTransport = async (providerId: string) => providerId === "openai"
+    || (await providerModelSettings.customProvider(providerId))?.api === "openai-responses"
+    || (await getModelRuntime()).getModels(providerId).some((model) => model.api === "openai-responses");
+  app.get<{ Params: { providerId: string } }>("/settings/models/providers/:providerId/transport", async (request, reply) => {
+    if (!await supportsResponsesTransport(request.params.providerId)) return reply.code(404).send({ error: "Responses provider not found" });
+    return { mode: providerModelSettings.responsesTransport(request.params.providerId) };
+  });
+  app.put<{ Params: { providerId: string }; Body: ResponsesTransportSettings }>("/settings/models/providers/:providerId/transport", {
+    schema: { body: { type: "object", additionalProperties: false, required: ["mode"], properties: { mode: { type: "string", enum: [...RESPONSES_TRANSPORT_MODES] } } } },
+  }, async (request, reply) => {
+    if (!await supportsResponsesTransport(request.params.providerId)) return reply.code(404).send({ error: "Responses provider not found" });
+    try {
+      await providerModelSettings.setResponsesTransport(request.params.providerId, request.body.mode);
+      return { mode: providerModelSettings.responsesTransport(request.params.providerId) };
+    }
+    catch (cause) { return reply.code(400).send({ error: cause instanceof Error ? cause.message : String(cause) }); }
+  });
 
   const hasModelProvider = async (runtime: ModelRuntime, id: string) => isNative3DProvider(id) || Boolean(runtime.getProvider(id))
     || id.startsWith("cloud-") && (await cloudModels.cloudCatalog()).providers.some((provider) => provider.id === id);
