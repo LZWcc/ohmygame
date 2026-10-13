@@ -41,6 +41,7 @@ import { loadPlayableAssets } from "./playable-assets.js";
 import { playablePickKey, usePlayableChatReport, type PlayableChatState, type PlayableMediaAttachment, type PlayableStroke } from "./playable-chat.js";
 import { isTextEntry } from "./editor-canvas.js";
 import { t } from "./i18n.js";
+import { PlaytestControls, type PlaytestAction, type PlaytestStart } from "./playable-playtest.js";
 
 const ASSET_UPLOAD_ACCEPT = ".png,.jpg,.jpeg,.webp,.mp4,.mov,.webm";
 const TOAST_LIMIT = 3;
@@ -50,11 +51,6 @@ const PICK_LIMIT = 8;
 
 export interface PlayableAssetRequest extends PlayableAssetDefinition {
   name: string;
-}
-
-/** A Playtest that starts at a Scene instead of the saved game, with a new game's values. */
-export interface PlaytestStart {
-  nodeId: string;
 }
 
 export interface PreviewRuntime {
@@ -106,6 +102,9 @@ export function PlayableNodeWorkbench({
   onRemoveBackdrop,
   backdrop,
   onPlayFromHere,
+  onPlaytestAction,
+  playtestBusy = false,
+  playtestDisabled = false,
   onChatContextChange,
 }: {
   projectId: string;
@@ -139,6 +138,9 @@ export function PlayableNodeWorkbench({
   backdrop?: "missing" | "set";
   /** Opens a Playtest that starts at this Scene. */
   onPlayFromHere?: (start: PlaytestStart) => void;
+  onPlaytestAction?: (action: PlaytestAction) => void;
+  playtestBusy?: boolean;
+  playtestDisabled?: boolean;
   onChatContextChange?: (state: PlayableChatState | undefined) => void;
   /** Puts a request in the chat prompt, for when it cannot be sent now. */
   onAskAgent?: (text: string) => void;
@@ -299,7 +301,7 @@ export function PlayableNodeWorkbench({
   // In the header, where the canvas has Playtest.
   const actions = <div className="story-node-editor-actions">
     <button type="button" className="icon-button pane-header-action" title={t("sceneWorkbench.replayTitle")} aria-label={t("sceneWorkbench.replay")} disabled={!runtime.definition} onClick={() => setSession((current) => current + 1)}><RotateCcw size={14} /></button>
-    {onPlayFromHere ? <button type="button" className="icon-button pane-header-action" data-tooltip={t("sceneWorkbench.playtestFromHere")} aria-label={t("sceneWorkbench.playFromHere")} onClick={() => onPlayFromHere({ nodeId: node.id })}><Play size={14} /></button> : null}
+    {onPlayFromHere ? <PlaytestControls label={t("sceneWorkbench.playFromHere")} title={t("sceneWorkbench.playtestFromHere")} disabled={playtestDisabled} busy={playtestBusy} onOpen={() => onPlayFromHere({ nodeId: node.id })} onAction={onPlaytestAction} /> : null}
   </div>;
 
   const previewPane = <WorkbenchPreview

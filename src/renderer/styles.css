@@ -15126,8 +15126,52 @@ button {
   color: var(--text-faint);
 }
 
-/* Over the Playtest game: Replay on hover, and a note when something breaks. Always dark. */
-.playable-playtest-corner button,
+/* Playtest actions stay in the editor, outside the game's input surface. */
+.playable-playtest-controls {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  app-region: no-drag;
+}
+.playable-playtest-controls > .playable-playtest-menu-trigger {
+  width: 18px;
+}
+.playable-playtest-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  min-width: 200px;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--menu-surface);
+  box-shadow: var(--menu-shadow);
+}
+.playable-playtest-menu > button {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.playable-playtest-menu > button:is(:hover, :focus-visible) {
+  background: var(--menu-hover);
+}
+
+/* Over the Playtest game: a note only when something breaks. Always dark. */
 .playable-playtest-problem {
   position: fixed;
   z-index: 10;
@@ -15138,38 +15182,6 @@ button {
   font-size: 11px;
   backdrop-filter: blur(12px);
   app-region: no-drag;
-}
-.playable-playtest-corner {
-  position: fixed;
-  z-index: 10;
-  top: 12px;
-  right: 12px;
-  display: flex;
-  gap: 6px;
-  opacity: 0;
-  transition: opacity 120ms ease;
-  app-region: no-drag;
-}
-/* Shown only while the pointer is near the top corner; the ::before widens that area. */
-.playable-playtest-corner:is(:hover, :focus-within) {
-  opacity: 1;
-}
-.playable-playtest-corner::before {
-  position: absolute;
-  inset: -24px -12px -24px -60px;
-  content: "";
-}
-.playable-playtest-corner button {
-  position: relative;
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.playable-playtest-problem {
   bottom: 16px;
   left: 50%;
   display: flex;
