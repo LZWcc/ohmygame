@@ -1,12 +1,9 @@
-import { useEffect, useRef, useState } from "react";
-import { History, InfoCircle, RotateCcw, Sparkles, X } from "./icons.js";
+import { useEffect, useId, useRef, useState } from "react";
+import { ChevronDown, History, InfoCircle, LoaderCircle, Play, RotateCcw, Sparkles, X } from "./icons.js";
 import type { NodeGraph } from "../shared/playable-nodes.js";
 import type { PlayableDebugRecord } from "../shared/playable-debug.js";
 import { playableNodeById } from "../shared/playable-graph.js";
-import type { PlaytestStart } from "./playable-node-workbench.js";
 import { t } from "./i18n.js";
-
-export type { PlaytestStart };
 
 const RECENT_LIMIT = 8;
 
@@ -16,43 +13,133 @@ export const playtestSaveKey = (projectId: string) => `ohmygame:playable:project
 /** What the author has seen while playtesting, which the Story Map shows. */
 export const playtestSeenKey = (projectId: string) => `${playtestSaveKey(projectId)}:seen`;
 
-const startKey = (projectId: string) => `ohmygame:playtest:start:${projectId}`;
-
-/**
- * Asks the Playtest window to start at a Scene ("Play from here"). The window
- * may not be open yet, so the request waits in localStorage until it is taken.
- */
-export function requestPlaytestStart(projectId: string, start: PlaytestStart): void {
-  window.localStorage.setItem(startKey(projectId), JSON.stringify(start));
+/** Starts at a chosen Scene with a new game's values, leaving the saved game untouched. */
+export interface PlaytestStart {
+  nodeId: string;
 }
 
-/** Takes a waiting start request, so it runs once. */
-export function takePlaytestStart(projectId: string): PlaytestStart | undefined {
-  const key = startKey(projectId);
+export type PlaytestAction = "replay" | "forget-seen";
+export type PlaytestRequest = { action: "start"; start: PlaytestStart } | { action: PlaytestAction };
+
+const requestKey = (projectId: string) => `ohmygame:playtest:request:${projectId}`;
+
+/**
+ * Sends an editor request to Playtest. If the window is not open yet, the
+ * request waits in localStorage until it is taken.
+ */
+export function requestPlaytest(projectId: string, request: PlaytestRequest): void {
+  window.localStorage.setItem(requestKey(projectId), JSON.stringify(request));
+}
+
+/** Takes a waiting request, so it runs once. */
+export function takePlaytestRequest(projectId: string): PlaytestRequest | undefined {
+  const key = requestKey(projectId);
   const raw = window.localStorage.getItem(key);
   if (raw === null) return undefined;
   window.localStorage.removeItem(key);
   try {
-    const start = JSON.parse(raw) as Partial<PlaytestStart>;
-    return typeof start.nodeId === "string" ? { nodeId: start.nodeId } : undefined;
+    const request = JSON.parse(raw) as Partial<PlaytestRequest> | null;
+    if (request?.action === "replay" || request?.action === "forget-seen") return { action: request.action };
+    if (request?.action === "start" && typeof request.start?.nodeId === "string") {
+      return { action: "start", start: { nodeId: request.start.nodeId } };
+    }
+    return undefined;
   } catch {
     return undefined;
   }
 }
 
-/** Calls `onStart` whenever another window asks this Playtest to start somewhere. */
-export function usePlaytestStartRequests(projectId: string, onStart: (start: PlaytestStart) => void): void {
-  const handler = useRef(onStart);
-  handler.current = onStart;
+/** Calls `onRequest` whenever the editor sends this Playtest an action. */
+export function usePlaytestRequests(projectId: string, onRequest: (request: PlaytestRequest) => void): void {
+  const handler = useRef(onRequest);
+  handler.current = onRequest;
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== startKey(projectId) || event.newValue === null) return;
-      const start = takePlaytestStart(projectId);
-      if (start) handler.current(start);
+      if (event.key !== requestKey(projectId) || event.newValue === null) return;
+      const request = takePlaytestRequest(projectId);
+      if (request) handler.current(request);
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, [projectId]);
+}
+
+/** Editor controls live outside the game, including when a Scene Workbench is open. */
+export function PlaytestControls({ disabled = false, busy = false, label = "Playtest", title = "Playtest in a new window", onOpen, onAction }: {
+  disabled?: boolean;
+  busy?: boolean;
+  label?: string;
+  title?: string;
+  onOpen: () => void;
+  onAction?: (action: PlaytestAction) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const unavailable = disabled || busy;
+
+  useEffect(() => {
+    if (unavailable) { setOpen(false); return; }
+    if (!open) return;
+    menu.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      trigger.current?.focus();
+    };
+    // Pointer events inside the Workbench's preview frame do not reach this document.
+    const onBlur = () => setOpen(false);
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [open, unavailable]);
+
+  const run = (action: PlaytestAction) => {
+    setOpen(false);
+    trigger.current?.focus();
+    onAction?.(action);
+  };
+
+  return <div className="playable-playtest-controls" ref={root}>
+    <button className="icon-button pane-header-action" type="button" data-tooltip={busy ? "Opening playtest..." : title} aria-label={label} disabled={unavailable} onClick={onOpen}>
+      {busy ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}
+    </button>
+    {onAction ? <button
+      ref={trigger} className="icon-button pane-header-action playable-playtest-menu-trigger" type="button"
+      title="Playtest actions" aria-label="Playtest actions" aria-haspopup="menu" aria-expanded={open} aria-controls={menuId}
+      disabled={unavailable} onClick={() => setOpen((current) => !current)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setOpen(true); }
+      }}
+    ><ChevronDown size={11} /></button> : null}
+    {open && !unavailable ? <div
+      ref={menu} className="playable-playtest-menu" id={menuId} role="menu" aria-label="Playtest actions"
+      onKeyDown={(event) => {
+        if (event.key === "Tab") { setOpen(false); return; }
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const items = Array.from(menu.current?.querySelectorAll<HTMLButtonElement>("button") ?? []);
+        const current = items.indexOf(document.activeElement as HTMLButtonElement);
+        const index = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+          : (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+        items[index]?.focus();
+      }}
+    >
+      <button type="button" role="menuitem" title="Replay from the starting Scene with a new game" onClick={() => run("replay")}><RotateCcw size={14} /><span>Replay</span></button>
+      <button type="button" role="menuitem" title="Clear the Story map's explored Scenes and paths, keeping the saved game" onClick={() => run("forget-seen")}><History size={14} /><span>Forget seen Scenes</span></button>
+    </div> : null}
+  </div>;
 }
 
 const askKey = (projectId: string) => `ohmygame:playtest:ask:${projectId}`;
@@ -86,15 +173,12 @@ export function usePlaytestAskRequests(projectId: string | undefined, onAsk: (te
 /**
  * What the Playtest window shows over the game: nothing while it works. When
  * something breaks, a short note offers to hand the problem to the AI, with
- * what the player was doing. Replay, and forgetting which Scenes were seen,
- * appear on hover in the corner.
+ * what the player was doing. Playtest controls stay in the editor.
  */
-export function PlaytestOverlay({ graph, record, diagnostics, onRestart, onForgetSeen, onAskAgent }: {
+export function PlaytestOverlay({ graph, record, diagnostics, onAskAgent }: {
   graph: NodeGraph;
   record?: PlayableDebugRecord;
   diagnostics: readonly string[];
-  onRestart: () => void;
-  onForgetSeen: () => void;
   onAskAgent?: (text: string) => void;
 }) {
   const errors = [...(record?.errors ?? []).map((error) => error.message), ...diagnostics];
@@ -104,10 +188,6 @@ export function PlaytestOverlay({ graph, record, diagnostics, onRestart, onForge
   useEffect(() => setSent(false), [errors.length]);
 
   return <>
-    <div className="playable-playtest-corner">
-      <button type="button" title={t("playtest.forgetTitle")} aria-label={t("playtest.forget")} onClick={onForgetSeen}><History size={13} /></button>
-      <button type="button" title={t("playtest.replayTitle")} aria-label={t("sceneWorkbench.replay")} onClick={onRestart}><RotateCcw size={13} /></button>
-    </div>
     {shown ? <aside className="playable-playtest-problem" role="alert">
       <InfoCircle size={13} />
       <span>{sent ? t("playtest.addedToChat") : t("playtest.broke")}</span>

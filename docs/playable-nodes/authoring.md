@@ -322,21 +322,26 @@ the wrong way.
 
 ## Playtest
 
-Playtest runs the real Runtime from the saved game or the Start Scene, or
-from a chosen Scene with a new game (**Play from here** in a
-Workbench). A chosen start runs without saving, so the saved game is
-untouched.
+Playtest runs the real Runtime from the Start Scene, with the saved game
+available through the game's Continue action, or from a chosen Scene with a
+new game (**Play from here** in a Workbench). A chosen start runs without
+saving, so the saved game is untouched.
 
 The Playtest window shows only the game. The author plays it as a player;
-reading the game's inner state is the Agent's work, not theirs. Replay
-appears when the pointer reaches the top-right corner. When something
-breaks, a short note says so and offers **Ask AI to fix**, which brings the
+reading the game's inner state is the Agent's work, not theirs. The editor's
+Playtest arrow menu holds **Replay**, which restarts from the session's starting
+Scene with a new game. A chosen start still leaves the saved game untouched.
+The same menu sits beside **Play from here** in the Workbench. These controls
+stay outside the game; desktop window controls and dragging use a native title
+bar outside the game surface. When something breaks, a short note says so
+and offers **Ask AI to fix**, which brings the
 editor forward on that Scene and fills the chat with where the player was,
 the Exits they took, and the errors, ready to send.
 
 Playtest also remembers which Scenes the author has seen and which Exits
 they took, across replays, as players' games do; a [Story map](#story-map)
-shows it. **Forget seen Scenes**, beside Replay, starts that record over.
+shows it. **Forget seen Scenes**, in the same editor menu, starts that record
+over without clearing the saved game, and reloads the Playtest session.
 
 The Agent reads the full record (current Scene, back stack, Exits taken,
 State, errors, save) in serializable form, so it can verify a flow it just
