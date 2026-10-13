@@ -31,6 +31,15 @@ export function openAIImageConnection(
       ),
     };
   };
+  const source = async (
+    input?: DiscoverOpenAIImageModelsRequest,
+  ): Promise<ImageSource | undefined> => {
+    const settings = input ?? store.get();
+    if (settings.mode === "disabled") return undefined;
+    return settings.mode === "separate"
+      ? store.source(settings.baseUrl, input?.apiKey)
+      : chatSource();
+  };
   return {
     async get(): Promise<OpenAIImageConnectionSettings> {
       const models = await runtime();
@@ -44,32 +53,24 @@ export function openAIImageConnection(
           : {}),
       };
     },
-    async source(
-      input?: DiscoverOpenAIImageModelsRequest,
-    ): Promise<ImageSource | undefined> {
-      const settings = input ?? store.get();
-      if (settings.mode === "disabled") return undefined;
-      return settings.mode === "separate"
-        ? store.source(settings.baseUrl, input?.apiKey)
-        : chatSource();
-    },
+    source,
     async resolve() {
+      const settings = store.get();
       const models = store.models();
-      const mode = store.get().mode;
-      const source = await this.source();
+      const imageSource = await source(settings);
       const connected =
-        Boolean(source) ||
+        Boolean(imageSource) ||
         (await runtime()
           .then((models) => models.hasConfiguredAuth("openai"))
           .catch(() => false));
       return {
-        source,
+        source: imageSource,
         models,
         connected,
-        ...(!source
+        ...(!imageSource
           ? {
               message:
-                mode === "disabled"
+                settings.mode === "disabled"
                   ? "OpenAI image generation is disabled. Configure an image connection to enable it."
                   : "Browser sign-in does not include image generation. Add an image API key and Base URL in OpenAI settings.",
             }
@@ -145,14 +146,13 @@ export function registerOpenAIImageRoutes(
           }));
         return {
           models,
-          warnings: [
-            "Fetching models checks the catalog only. Add missing model aliases manually and choose their supported GPT Image template.",
-            ...(discovered.truncated
-              ? [
+          ...(discovered.truncated
+            ? {
+                warnings: [
                   "The model list was truncated. Other IDs can be added manually.",
-                ]
-              : []),
-          ],
+                ],
+              }
+            : {}),
         } satisfies DiscoveredOpenAIImageModels;
       } catch (cause) {
         return reply.code(400).send({ error: errorMessage(cause) });

@@ -39,8 +39,9 @@ then choose **Save**. The section normally shows compact connection details and
 enabled models; **Edit** reveals model management, and a model's pencil reveals
 its capability template. Fetching checks the catalog, not generation
 access, and does not save the draft or generate a paid image. A failed fetch keeps
-the saved connection available. Changing the draft connection clears its model
-list and cancels an outstanding fetch; **Cancel** restores saved settings.
+the saved connection available. Changing the draft connection mode or Base URL
+clears its model list and cancels an outstanding fetch. Replacing a key at the
+same endpoint keeps model choices. **Cancel** restores saved settings.
 
 If the service omits a model from its list, use **Add model** with its exact ID or
 alias. Choose **GPT Image 1 / 1.5** for fixed sizes or **GPT Image 2 / 2.5** for

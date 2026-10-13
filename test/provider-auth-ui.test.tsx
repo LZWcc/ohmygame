@@ -18,6 +18,13 @@ const api = {
   getOpenAIEndpointSettings: vi.fn(async () => ({
     baseUrl: "https://api.openai.com/v1",
   })),
+  getOpenAIImageSettings: vi.fn(async () => ({
+    mode: "connection",
+    baseUrl: "https://api.openai.com/v1",
+    configured: false,
+    connectionAvailable: false,
+    models: [],
+  })),
   subscribeToModelAuth: vi.fn(
     (_id: string, handlers: { onEvent: (event: ModelAuthEvent) => void }) => {
       onEvent = handlers.onEvent;
@@ -105,11 +112,11 @@ it.each([
     await i18next.changeLanguage(locale);
     await render();
     const choices = [
-      ...host.querySelectorAll<HTMLButtonElement>(".settings-method-row"),
+      ...host.querySelectorAll<HTMLButtonElement>(
+        ".settings-form-actions button",
+      ),
     ];
-    expect(
-      choices.map((choice) => choice.querySelector("strong")?.textContent),
-    ).toEqual([oauth, key]);
+    expect(choices.map((choice) => choice.textContent)).toEqual([oauth, key]);
     await act(async () => choices[1]!.click());
     expect(api.startModelProviderLogin).toHaveBeenCalledWith(
       "openai",
@@ -159,6 +166,29 @@ it.each(["en", "zh-CN"])(
     expect(input.placeholder).toBe("code#state");
   },
 );
+
+it("offers first-time chat credentials and an endpoint for an image-only OpenAI connection", async () => {
+  await i18next.changeLanguage("en");
+  await render({
+    ...openai,
+    configured: true,
+    languageConfigured: false,
+    imageConfigured: true,
+  });
+  const choice = [
+    ...host.querySelectorAll<HTMLButtonElement>(
+      ".settings-form-actions button",
+    ),
+  ].find((button) => button.textContent === "OpenAI API key")!;
+  await act(async () => choice.click());
+  await prompt({ type: "secret", message: "Enter OpenAI API key" });
+  const input = host.querySelector<HTMLInputElement>('input[type="password"]')!;
+  expect(input.closest("label")?.textContent).toBe("Enter OpenAI API key");
+  expect(input.placeholder).toBe("Paste your OpenAI API key");
+  expect(
+    host.querySelector<HTMLInputElement>("#model-provider-base-url")?.value,
+  ).toBe("https://api.openai.com/v1");
+});
 
 it.each(["en", "zh-CN"])(
   "preserves multi-step cloud credential prompts in %s",

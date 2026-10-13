@@ -1920,10 +1920,10 @@ export function createApp(options: AppOptions = {}) {
     const customModels = new Map(customProviders.map((provider) => [provider.id, provider]));
     const customImageProviders = new Set(customProviders
       .filter((provider) => CUSTOM_IMAGE_MODEL_APIS.some((api) => api === provider.api)).map((provider) => provider.id));
+    const image = openAIImages.get();
     const providers = piProviders
       .map((provider) => {
         const custom = customModels.get(provider.id);
-        const image = openAIImages.get();
         const imageConfigured = provider.id === "openai" && (image.mode === "separate" ? image.configured : image.mode === "connection" && provider.configured && provider.credentialType !== "oauth");
         const configured = provider.configured || imageConfigured;
         return {

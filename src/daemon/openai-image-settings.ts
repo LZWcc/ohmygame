@@ -53,7 +53,10 @@ export class OpenAIImageSettingsStore {
     };
   }
 
-  source(baseUrl = this.get().baseUrl, apiKey?: string): ImageSource {
+  source(
+    baseUrl = this.#settings?.baseUrl ?? OPENAI_IMAGE_BASE_URL,
+    apiKey?: string,
+  ): ImageSource {
     const endpoint = normalizeEndpoint(baseUrl);
     const key =
       apiKey?.trim() ||

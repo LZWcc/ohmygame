@@ -247,3 +247,29 @@ it("merges refreshed models without changing saved aliases, templates or enable 
     ).value,
   ).toBe("gpt-image-1");
 });
+
+it("keeps model aliases and enabled choices when rotating a key at the same endpoint", async () => {
+  const models = [
+    {
+      id: "alias",
+      name: "Relay image",
+      template: "gpt-image-1",
+      enabled: true,
+    },
+  ];
+  api.get.mockResolvedValue({
+    ...initial,
+    mode: "separate",
+    configured: true,
+    models,
+  });
+  await render();
+  await clickLabel("Edit image API key");
+  await fill("Image API key", "replacement-key");
+  expect(container.textContent).toContain("Relay image");
+  await save();
+  expect(api.save).toHaveBeenCalledWith(
+    expect.objectContaining({ apiKey: "replacement-key", models }),
+  );
+  expect(api.discover).not.toHaveBeenCalled();
+});

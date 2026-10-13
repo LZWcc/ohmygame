@@ -709,8 +709,8 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
         {displayedProvider.configured ? <ProviderEnableControl provider={displayedProvider} disabled={deletion.busy} onChanged={() => setModelsRevision((value) => value + 1)} /> : null}
       </ProviderDetailHeader>
       <ProviderDeleteConfirmation provider={{ ...displayedProvider, credentialType: chatConnected ? credentialType : undefined }} deletion={deletion} disabled={Boolean(editing) || endpoint.saving} />
-      {!chatConnected ? <div className="settings-detail-section"><h4>Chat connection</h4><p className="settings-detail-hint">Connect a chat model independently of image generation.</p><div className="settings-form-actions">{provider.methods.map((method) => <button type="button" className="settings-secondary-button" key={method.type} disabled={Boolean(editing) || deletion.busy} onClick={() => edit(method.type)}>{method.type === "oauth" ? "Use browser sign-in" : "Use API key"}</button>)}</div></div> : null}
-      {!chatConnected || alternateMethod || canEditKey || showsEndpoint ? <div className="settings-provider-connection">
+      {!chatConnected ? <div className="settings-detail-section"><h4>{t("openAIImages.chatTitle")}</h4><p className="settings-detail-hint">{t("openAIImages.chatHint")}</p><div className="settings-form-actions">{provider.methods.map((method) => <button type="button" className="settings-secondary-button" key={method.type} disabled={Boolean(editing) || deletion.busy} onClick={() => edit(method.type)}>{authMethodLabel(method)}</button>)}</div></div> : null}
+      {editing || alternateMethod || canEditKey || showsEndpoint ? <div className="settings-provider-connection">
         {alternateMethod ? <div className="settings-provider-setting-row settings-provider-auth-row">
           <span className="settings-search-field-label">{t("providers.signIn")}</span>
           <span className="settings-provider-setting-value">{credentialType === "oauth" ? t("providers.browserSignIn") : t("providers.apiKey")}</span>
@@ -723,7 +723,7 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
             <button className="icon-button settings-provider-setting-edit" type="button" aria-label={t("providers.editApiKey")} data-tooltip={t("providers.editApiKey")} aria-expanded={editing === "api_key"} disabled={Boolean(editing) || deletion.busy} onClick={() => edit("api_key")}><Pencil size={15} aria-hidden="true" /></button>
           </div>
         </section> : null}
-        {editing === "api_key" || editing === "oauth" ? <div className="settings-provider-setting-editor"><ActiveProviderAuth provider={provider} method={editing} inline onBack={() => setEditing(undefined)} onCompleted={() => completeAuth(editing)} onFailed={(message) => { setEditing(undefined); setError(message); }} /></div> : null}
+        {editing === "api_key" || editing === "oauth" ? <div className="settings-provider-setting-editor"><ActiveProviderAuth provider={{ ...provider, configured: chatConnected }} method={editing} inline onBack={() => setEditing(undefined)} onCompleted={() => completeAuth(editing)} onFailed={(message) => { setEditing(undefined); setError(message); }} /></div> : null}
         {showsEndpoint ? <section aria-label={t("providers.baseUrlSettings")}>
           <div className="settings-provider-setting-row">
             <span className="settings-search-field-label">{t("providers.baseUrl")}</span>
@@ -756,8 +756,8 @@ function ActiveProviderAuth({ provider, method, inline = false, onBack, onComple
   const [error, setError] = useState<string>();
   const operationRef = useRef<string | undefined>(undefined);
   const openedUrl = useRef<string | undefined>(undefined);
-  const endpoint = useProviderEndpoint(inline ? "" : provider.id);
-  const editingKey = inline && method === "api_key";
+  const endpoint = useProviderEndpoint(inline && provider.configured ? "" : provider.id);
+  const editingKey = inline && provider.configured && method === "api_key";
   const apiKeyMethod = provider.methods.find((candidate) => candidate.type === "api_key");
   // Translate the SDK's standard key prompt, keeping multi-step/custom auth instructions intact.
   const standardKeyPrompt = method === "api_key" && prompt?.value.type === "secret"

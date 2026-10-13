@@ -25,12 +25,13 @@ import {
   Search,
   Trash2,
 } from "./icons.js";
+import { t } from "./i18n.js";
 
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const templateName = (template: OpenAIImageModelConfiguration["template"]) =>
   template === "gpt-image-1"
-    ? "GPT Image 1 / 1.5 · fixed sizes"
-    : "GPT Image 2 / 2.5 · flexible sizes";
+    ? t("openAIImages.fixedSizes")
+    : t("openAIImages.flexibleSizes");
 
 export function OpenAIImageModels({
   revision,
@@ -64,7 +65,6 @@ export function OpenAIImageModels({
     useState<OpenAIImageModelConfiguration["template"]>("gpt-image-2");
   const [query, setQuery] = useState("");
   const discovery = useRef<AbortController | undefined>(undefined);
-  const active = useRef(true);
   const generation = useRef(0);
   const baseline = useRef<SaveOpenAIImageConnectionRequest | undefined>(
     undefined,
@@ -91,24 +91,24 @@ export function OpenAIImageModels({
     setQuery("");
   }
   useEffect(() => {
-    active.current = true;
-    ++generation.current;
-    let current = true;
+    const currentGeneration = ++generation.current;
     discovery.current?.abort();
+    setSaved(undefined);
+    setEditing(false);
     setFetching(false);
     setBusy(false);
     setError(undefined);
     setNotice(undefined);
     void getOpenAIImageSettings()
       .then((settings) => {
-        if (current) reset(settings);
+        if (currentGeneration === generation.current) reset(settings);
       })
       .catch((cause) => {
-        if (current) setError(errorMessage(cause));
+        if (currentGeneration === generation.current)
+          setError(errorMessage(cause));
       });
     return () => {
-      current = false;
-      active.current = false;
+      ++generation.current;
       discovery.current?.abort();
     };
   }, [revision]);
@@ -121,11 +121,12 @@ export function OpenAIImageModels({
     setFetching(false);
     setError(undefined);
     setNotice(undefined);
-    if (["mode", "baseUrl", "apiKey"].includes(key)) setEditingModel(undefined);
+    const changesConnection = key === "mode" || key === "baseUrl";
+    if (changesConnection) setEditingModel(undefined);
     setForm((current) => ({
       ...current,
       [key]: value,
-      ...(["mode", "baseUrl", "apiKey"].includes(key) ? { models: [] } : {}),
+      ...(changesConnection ? { models: [] } : {}),
     }));
   }
   function editConnection(setting: "mode" | "key" | "url"): void {
@@ -156,17 +157,21 @@ export function OpenAIImageModels({
         controller.signal,
       );
       if (controller.signal.aborted) return;
-      setForm((current) => ({
-        ...current,
-        models: [
-          ...current.models,
-          ...loaded.models.filter(
-            (model) => !current.models.some((entry) => entry.id === model.id),
-          ),
-        ],
-      }));
+      setForm((current) => {
+        const existingIds = new Set(current.models.map((model) => model.id));
+        return {
+          ...current,
+          models: [
+            ...current.models,
+            ...loaded.models.filter((model) => !existingIds.has(model.id)),
+          ],
+        };
+      });
       setNotice(
-        `Fetched ${loaded.models.length} image models. Enable the models you want and save.${loaded.warnings?.length ? ` ${loaded.warnings.join(" ")}` : ""}`,
+        [
+          t("openAIImages.fetched", { count: loaded.models.length }),
+          ...(loaded.warnings ?? []),
+        ].join(" "),
       );
     } catch (cause) {
       if (!controller.signal.aborted) setError(errorMessage(cause));
@@ -174,59 +179,44 @@ export function OpenAIImageModels({
       if (!controller.signal.aborted) setFetching(false);
     }
   }
-  async function save(event: FormEvent): Promise<void> {
+  function save(event: FormEvent): void {
     event.preventDefault();
+    void persist(() => saveOpenAIImageSettings(form), t("openAIImages.saved"));
+  }
+  async function persist(
+    operation: () => Promise<OpenAIImageConnectionSettings>,
+    message: string,
+  ): Promise<void> {
     const currentGeneration = generation.current;
     setBusy(true);
     setError(undefined);
     discovery.current?.abort();
     setFetching(false);
     try {
-      const settings = await saveOpenAIImageSettings(form);
-      if (!active.current || currentGeneration !== generation.current) return;
+      const settings = await operation();
+      if (currentGeneration !== generation.current) return;
       reset(settings);
-      setNotice("Image connection saved.");
+      setNotice(message);
       onChanged(
         settings.mode === "separate"
           ? settings.configured
           : settings.mode === "connection" && settings.connectionAvailable,
       );
     } catch (cause) {
-      if (active.current && currentGeneration === generation.current)
+      if (currentGeneration === generation.current)
         setError(errorMessage(cause));
     } finally {
-      if (active.current && currentGeneration === generation.current)
-        setBusy(false);
-    }
-  }
-  async function remove(): Promise<void> {
-    const currentGeneration = generation.current;
-    setBusy(true);
-    setError(undefined);
-    discovery.current?.abort();
-    setFetching(false);
-    try {
-      const settings = await removeOpenAIImageSettings();
-      if (!active.current || currentGeneration !== generation.current) return;
-      reset(settings);
-      setNotice("Image connection removed.");
-      onChanged(false);
-    } catch (cause) {
-      if (active.current && currentGeneration === generation.current)
-        setError(errorMessage(cause));
-    } finally {
-      if (active.current && currentGeneration === generation.current)
-        setBusy(false);
+      if (currentGeneration === generation.current) setBusy(false);
     }
   }
   function addModel(): void {
     const id = manualId.trim();
     if (!id || /\s/.test(id)) {
-      setError("Enter a model ID without spaces");
+      setError(t("openAIImages.invalidModelId"));
       return;
     }
     if (form.models.some((model) => model.id === id)) {
-      setError("A model with this ID already exists");
+      setError(t("openAIImages.duplicateModelId"));
       return;
     }
     field("models", [
@@ -278,11 +268,12 @@ export function OpenAIImageModels({
   return (
     <section
       className={`settings-detail-section provider-models${editing ? " is-editing" : ""}`}
-      aria-label="Image models"
+      aria-label={t("providers.imageModels")}
     >
       <div className="provider-models-heading">
         <h4>
-          Image models <small>{saved ? enabledCount : ""}</small>
+          {t("providers.imageModels")}{" "}
+          <small>{saved ? enabledCount : ""}</small>
         </h4>
         {saved ? (
           <div className="provider-models-heading-actions">
@@ -299,7 +290,9 @@ export function OpenAIImageModels({
                       size={13}
                       className={fetching ? "spin" : undefined}
                     />
-                    {fetching ? "Fetching…" : "Fetch models"}
+                    {fetching
+                      ? t("customProvider.fetching")
+                      : t("openAIImages.fetchModels")}
                   </button>
                   <button
                     className="settings-secondary-button"
@@ -312,7 +305,7 @@ export function OpenAIImageModels({
                     }}
                   >
                     <Plus size={13} />
-                    Add model
+                    {t("models.add")}
                   </button>
                 </>
               ) : null
@@ -321,7 +314,9 @@ export function OpenAIImageModels({
                 className="settings-secondary-button"
                 type="button"
                 aria-label={
-                  connected ? "Edit image models" : "Connect image models"
+                  connected
+                    ? t("openAIImages.editModels")
+                    : t("openAIImages.connectModels")
                 }
                 disabled={locked}
                 onClick={() => {
@@ -333,7 +328,7 @@ export function OpenAIImageModels({
                 }}
               >
                 {connected ? <Pencil size={13} /> : <Plus size={13} />}
-                {connected ? "Edit" : "Connect"}
+                {connected ? t("common.edit") : t("providers.action.connect")}
               </button>
             )}
           </div>
@@ -353,7 +348,7 @@ export function OpenAIImageModels({
         !error ? (
           <div className="settings-loading">
             <LoaderCircle size={16} className="spin" />
-            Loading image settings
+            {t("openAIImages.loading")}
           </div>
         ) : null
       ) : (
@@ -368,7 +363,7 @@ export function OpenAIImageModels({
                 htmlFor={`${fieldId}-connection`}
               >
                 <span className="settings-search-field-label">
-                  Image connection
+                  {t("openAIImages.imageConnection")}
                 </span>
                 <select
                   id={`${fieldId}-connection`}
@@ -384,17 +379,16 @@ export function OpenAIImageModels({
                     )
                   }
                 >
-                  <option value="separate">
-                    Separate API key and Base URL
-                  </option>
+                  <option value="separate">{t("openAIImages.separate")}</option>
                   <option
                     value="connection"
                     disabled={!saved.connectionAvailable}
                   >
-                    Use chat API connection
-                    {!saved.connectionAvailable ? " (API key required)" : ""}
+                    {saved.connectionAvailable
+                      ? t("openAIImages.useChat")
+                      : t("openAIImages.chatKeyRequired")}
                   </option>
-                  <option value="disabled">Disabled</option>
+                  <option value="disabled">{t("common.disabled")}</option>
                 </select>
               </label>
               {form.mode === "separate" ? (
@@ -404,8 +398,10 @@ export function OpenAIImageModels({
                     htmlFor={`${fieldId}-key`}
                   >
                     <span className="settings-search-field-label">
-                      Image API key{" "}
-                      {saved.configured && sameEndpoint ? "· configured" : ""}
+                      {t("openAIImages.imageKey")}
+                      {saved.configured && sameEndpoint
+                        ? ` · ${t("openAIImages.configured")}`
+                        : ""}
                     </span>
                     <input
                       id={`${fieldId}-key`}
@@ -420,8 +416,8 @@ export function OpenAIImageModels({
                       required={!saved.configured || !sameEndpoint}
                       placeholder={
                         saved.configured && sameEndpoint
-                          ? "Leave blank to keep the saved image key"
-                          : "Paste the API key for this endpoint"
+                          ? t("openAIImages.keepKey")
+                          : t("openAIImages.keyPlaceholder")
                       }
                       onChange={(event) => field("apiKey", event.target.value)}
                     />
@@ -431,7 +427,7 @@ export function OpenAIImageModels({
                     htmlFor={`${fieldId}-url`}
                   >
                     <span className="settings-search-field-label">
-                      Image Base URL
+                      {t("openAIImages.imageUrl")}
                     </span>
                     <input
                       id={`${fieldId}-url`}
@@ -448,48 +444,50 @@ export function OpenAIImageModels({
                 </div>
               ) : form.mode === "connection" ? (
                 <p className="settings-detail-hint">
-                  Uses the chat API key and endpoint: {saved.connectionBaseUrl}
+                  {t("openAIImages.chatEndpoint", {
+                    baseUrl: saved.connectionBaseUrl,
+                  })}
                 </p>
               ) : null}
               <p className="settings-detail-hint">
-                Images use API billing. A compatible GPT Image relay is
-                supported.
+                {t("openAIImages.billingHint")}
               </p>
             </div>
           ) : connected || form.mode === "disabled" || editing ? (
             <div>
               {[
                 {
-                  label: "Connection",
+                  label: t("openAIImages.connection"),
                   value:
                     form.mode === "separate"
-                      ? "Separate API key"
+                      ? t("openAIImages.separateKey")
                       : form.mode === "connection"
-                        ? "Chat API connection"
-                        : "Disabled",
+                        ? t("openAIImages.chatConnection")
+                        : t("common.disabled"),
                   setting: "mode" as const,
-                  ariaLabel: "Edit image connection",
+                  ariaLabel: t("openAIImages.editConnection"),
                 },
                 ...(form.mode === "separate"
                   ? [
                       {
-                        label: "API key",
+                        label: t("providers.apiKey"),
                         value: "••••••••",
                         setting: "key" as const,
-                        ariaLabel: "Edit image API key",
+                        ariaLabel: t("openAIImages.editKey"),
                       },
                     ]
                   : []),
                 ...(form.mode !== "disabled"
                   ? [
                       {
-                        label: "Base URL",
+                        label: t("providers.baseUrl"),
                         value:
                           form.mode === "connection"
-                            ? (saved.connectionBaseUrl ?? "Unavailable")
+                            ? (saved.connectionBaseUrl ??
+                              t("providers.unavailable"))
                             : form.baseUrl,
                         setting: "url" as const,
-                        ariaLabel: "Edit image Base URL",
+                        ariaLabel: t("openAIImages.editUrl"),
                       },
                     ]
                   : []),
@@ -524,7 +522,7 @@ export function OpenAIImageModels({
             </div>
           ) : (
             <p className="settings-detail-hint">
-              Connect an API key for OpenAI or a compatible GPT Image relay.
+              {t("openAIImages.connectHint")}
             </p>
           )}
           {form.mode !== "disabled" && (connected || editing) ? (
@@ -534,10 +532,10 @@ export function OpenAIImageModels({
                   <label className="settings-provider-search">
                     <Search size={14} />
                     <input
-                      aria-label="Search image models"
+                      aria-label={t("openAIImages.search")}
                       value={query}
                       onChange={(event) => setQuery(event.target.value)}
-                      placeholder="Search image models"
+                      placeholder={t("openAIImages.search")}
                     />
                   </label>
                 </div>
@@ -549,7 +547,7 @@ export function OpenAIImageModels({
                     htmlFor={`${fieldId}-model`}
                   >
                     <span className="settings-search-field-label">
-                      Model ID
+                      {t("models.modelId")}
                     </span>
                     <input
                       id={`${fieldId}-model`}
@@ -566,7 +564,7 @@ export function OpenAIImageModels({
                         else if (/^gpt-image-2(?:[.-]|$)/.test(id))
                           setManualTemplate("gpt-image-2");
                       }}
-                      placeholder="gpt-image-2 or the relay's model alias"
+                      placeholder={t("openAIImages.modelPlaceholder")}
                     />
                   </label>
                   <TemplateField
@@ -582,7 +580,7 @@ export function OpenAIImageModels({
                       disabled={locked}
                       onClick={() => setAdding(false)}
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                     <button
                       className="settings-primary-button"
@@ -590,7 +588,7 @@ export function OpenAIImageModels({
                       disabled={locked || !manualId.trim()}
                       onClick={addModel}
                     >
-                      Add
+                      {t("common.add")}
                     </button>
                   </div>
                 </div>
@@ -598,7 +596,7 @@ export function OpenAIImageModels({
               <div
                 className="provider-models-list"
                 role="list"
-                aria-label="Configured image models"
+                aria-label={t("openAIImages.configuredModels")}
                 aria-busy={fetching}
               >
                 {models.map((model) => {
@@ -622,7 +620,9 @@ export function OpenAIImageModels({
                               type="checkbox"
                               checked={model.enabled}
                               disabled={locked || fetching}
-                              aria-label={`Enable ${model.name}`}
+                              aria-label={t("providers.enableProvider", {
+                                name: model.name,
+                              })}
                               onChange={(event) =>
                                 changeModel(model.id, {
                                   enabled: event.target.checked,
@@ -640,8 +640,12 @@ export function OpenAIImageModels({
                               className="icon-button"
                               type="button"
                               disabled={locked || fetching || adding}
-                              aria-label={`Edit ${model.name}`}
-                              data-tooltip={`Edit ${model.name}`}
+                              aria-label={t("common.editName", {
+                                name: model.name,
+                              })}
+                              data-tooltip={t("common.editName", {
+                                name: model.name,
+                              })}
                               aria-expanded={editingModel === model.id}
                               onClick={() =>
                                 setEditingModel(
@@ -657,8 +661,12 @@ export function OpenAIImageModels({
                               className="icon-button provider-model-delete"
                               type="button"
                               disabled={locked || fetching}
-                              aria-label={`Remove ${model.id}`}
-                              data-tooltip={`Remove ${model.id}`}
+                              aria-label={t("common.removeName", {
+                                name: model.id,
+                              })}
+                              data-tooltip={t("common.removeName", {
+                                name: model.id,
+                              })}
                               onClick={() => {
                                 field(
                                   "models",
@@ -694,10 +702,10 @@ export function OpenAIImageModels({
                 {!models.length ? (
                   <p className="settings-empty">
                     {query.trim()
-                      ? "No image models match this search."
+                      ? t("openAIImages.noMatch")
                       : editing
-                        ? "Fetch models or add a model ID manually."
-                        : "No image models enabled."}
+                        ? t("openAIImages.empty")
+                        : t("openAIImages.noneEnabled")}
                   </p>
                 ) : null}
               </div>
@@ -709,8 +717,8 @@ export function OpenAIImageModels({
                 <button
                   className="icon-button provider-model-delete"
                   type="button"
-                  aria-label="Remove image connection"
-                  data-tooltip="Remove image connection"
+                  aria-label={t("openAIImages.removeConnection")}
+                  data-tooltip={t("openAIImages.removeConnection")}
                   disabled={locked || fetching}
                   onClick={() => setRemoving(true)}
                 >
@@ -724,31 +732,33 @@ export function OpenAIImageModels({
                   disabled={locked}
                   onClick={cancel}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </button>
                 <button
                   className="settings-primary-button"
                   type="submit"
                   disabled={locked || fetching || !dirty}
                 >
-                  {busy ? "Saving…" : "Save"}
+                  {busy ? t("common.saving") : t("common.save")}
                 </button>
               </div>
             </div>
           ) : null}
           {removing ? (
             <div className="settings-provider-delete-confirmation">
-              <span>
-                Remove the saved image key and models? Image generation will be
-                disabled.
-              </span>
+              <span>{t("openAIImages.removeConfirmation")}</span>
               <button
                 className="settings-danger-button"
                 type="button"
                 disabled={locked}
-                onClick={() => void remove()}
+                onClick={() =>
+                  void persist(
+                    removeOpenAIImageSettings,
+                    t("openAIImages.removed"),
+                  )
+                }
               >
-                Remove
+                {t("openAIImages.remove")}
               </button>
               <button
                 className="settings-secondary-button"
@@ -756,7 +766,7 @@ export function OpenAIImageModels({
                 disabled={locked}
                 onClick={() => setRemoving(false)}
               >
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           ) : null}
@@ -781,11 +791,15 @@ function TemplateField({
 }) {
   return (
     <label className="settings-detail-field" htmlFor={id}>
-      <span className="settings-search-field-label">Capability template</span>
+      <span className="settings-search-field-label">
+        {t("openAIImages.template")}
+      </span>
       <select
         id={id}
         className="settings-search-input"
-        aria-label={modelId ? `Capability template for ${modelId}` : undefined}
+        aria-label={
+          modelId ? t("openAIImages.templateFor", { modelId }) : undefined
+        }
         value={value}
         disabled={disabled}
         onChange={(event) =>
