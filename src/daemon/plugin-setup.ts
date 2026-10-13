@@ -225,9 +225,11 @@ export class PluginSetupManager {
   async icon(id: string, requested?: string) {
     const state = await this.#loadState(id);
     if (!state.draftPath) return undefined;
-    const draft = await this.draft(id);
     const root = await pluginDraftPath(path.join(this.#directory(id), "workspace"), state.draftPath);
-    return readPluginIconAsset(root, requested ? { type: "asset", path: requested } : draft.plugin?.icon);
+    if (requested) return readPluginIconAsset(root, { type: "asset", path: requested });
+    const { content } = await readPluginDraftFile(root, PLUGIN_MANIFEST_PATH);
+    const manifest: unknown = JSON.parse(content);
+    return readPluginIconAsset(root, isPluginManifest(manifest) ? manifest.interface?.icon : undefined);
   }
   async updateIcon(id: string, input: PluginIconUpdate): Promise<PluginDraft> {
     const state = await this.#loadState(id);

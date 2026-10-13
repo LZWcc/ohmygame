@@ -32,7 +32,7 @@ async function environment() {
   const setup = manager();
   const app = Fastify();
   registerPluginSetupRoutes(app, setup);
-  registerPluginIconRoutes(app, catalog, [local]);
+  registerPluginIconRoutes(app, [local]);
   cleanup.push(() => app.close());
   return { directory, agentDir, settings, local, capabilities, setup, manager, app, invalidate };
 }

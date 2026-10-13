@@ -1,9 +1,9 @@
 import type { AgentModelRef, AgentReasoningLevel, Turn } from "./contracts.js";
 import type { PluginDetail, PluginMcpResult, PluginIcon } from "./plugins.js";
-export type PluginIconUpdate = { revision: string } & (
+export type PluginIconChange =
   | { icon: PluginIcon | null }
-  | { image: { mediaType: "image/png" | "image/webp"; data: string } }
-);
+  | { image: { mediaType: "image/png" | "image/webp"; data: string } };
+export type PluginIconUpdate = PluginIconChange & { revision: string };
 export interface PluginSetupSummary {
   id: string;
   pluginId?: string;

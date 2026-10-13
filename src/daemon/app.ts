@@ -763,7 +763,7 @@ export function createApp(options: AppOptions = {}) {
     return { runtime, model };
   });
   registerPluginSetupRoutes(app, pluginSetup);
-  registerPluginIconRoutes(app, plugins, [bundledPlugins, localPlugins]);
+  registerPluginIconRoutes(app, [bundledPlugins, localPlugins]);
 
   app.addContentTypeParser("image/webp", { parseAs: "buffer", bodyLimit: MAX_PROJECT_COVER_BYTES }, (_request, body, done) => {
     done(null, body);

@@ -82,11 +82,9 @@ export function PluginGlyph({
 }): ReactNode {
   const generation = useReadyRuntimeGeneration();
   const [image, setImage] = useState<string>();
-  const [failed, setFailed] = useState(false);
   const asset = plugin.icon?.type === "asset" ? plugin.icon.path : undefined;
   useEffect(() => {
     setImage(undefined);
-    setFailed(false);
     if (!asset) return;
     const controller = new AbortController();
     let url: string | undefined;
@@ -120,7 +118,7 @@ export function PluginGlyph({
     generation,
     previewAsset,
   ]);
-  if (asset && image && !failed)
+  if (asset && image)
     return (
       <img
         src={image}
@@ -129,7 +127,7 @@ export function PluginGlyph({
         alt=""
         aria-hidden="true"
         className="plugin-icon-image"
-        onError={() => setFailed(true)}
+        onError={() => setImage(undefined)}
       />
     );
   if (plugin.icon?.type === "preset") {

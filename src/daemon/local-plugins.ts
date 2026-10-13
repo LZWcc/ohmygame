@@ -201,6 +201,13 @@ export class LocalPluginStore {
     return record ? this.#installedPath(record.marketplace.id, record.name, record.version) : undefined;
   }
 
+  async readIcon(id: string) {
+    await this.#mutations;
+    const record = (await this.#readIndex()).find((item) => pluginRecordId(item) === id);
+    if (!record) return undefined;
+    return readPluginIconAsset(this.#installedPath(record.marketplace.id, record.name, record.version), record.manifest.interface?.icon);
+  }
+
   async directoryPath(id: string): Promise<string | undefined> {
     const record = (await this.#readIndex()).find((item) => pluginRecordId(item) === id);
     if (!record) return undefined;

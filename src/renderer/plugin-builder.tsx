@@ -165,7 +165,11 @@ export function PluginBuilder({ sessionId }: { sessionId: string }) {
           {plugin ? <PluginOverview plugin={plugin} setupId={draftPlugin ? sessionId : undefined} disabled={disabled} onEditIcon={draftPlugin && !draft?.errors.length ? () => setIconEditing(true) : undefined} onChooseView={setView} onChooseFile={file => { setView("files"); setFileRequest(file); }} /> : <EmptyView label="No draft" />}
           {iconEditing && draftPlugin && draft?.revision ? <PluginIconPicker plugin={draftPlugin} setupId={sessionId} files={draft.files} disabled={disabled} onClose={() => setIconEditing(false)} onSave={async change => {
             setOperation("saving-icon");
-            try { await updatePluginDraftIcon(sessionId, { ...change, revision: draft.revision! }); await refresh(); }
+            try {
+              const nextDraft = await updatePluginDraftIcon(sessionId, { ...change, revision: draft.revision! });
+              const nextState = await readPluginSetup(sessionId);
+              setSnapshot(current => current ? { ...current, draft: nextDraft, state: nextState } : current);
+            }
             finally { setOperation(undefined); }
           }} /> : null}
         </>;

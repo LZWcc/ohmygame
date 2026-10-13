@@ -42,7 +42,7 @@ beforeEach(() => {
     if (route === `/plugins/setup-sessions/${sessionId}/icon` && method === "PUT") {
       const input = JSON.parse(String(init.body)); savedIcon = input;
       draftIcon = input.icon ?? undefined; iconChanged = true;
-      return Response.json({ plugin: { ...plugin, icon: draftIcon }, revision: "b".repeat(64), files: [], errors: [] });
+      return Response.json({ path: "review", installedRevision: installed ? revision : undefined, plugin: { ...plugin, installed: false, icon: draftIcon }, revision: "b".repeat(64), files: [], errors: [], checks: {} });
     }
     if (route === "/health") return Response.json({ status: "ok" });
     if (route === "/models") return Response.json({ models: [], providers: [] });
@@ -137,6 +137,12 @@ describe("Plugin Builder icons", () => {
     expect(savedIcon).toEqual({ revision, icon: { type: "preset", id: "music" } });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect([...container.querySelectorAll<HTMLButtonElement>("button")].find(element => element.textContent === "Update plugin")?.disabled).toBe(false);
+    expect(requests.filter(request => request === `GET /plugins/setup-sessions/${sessionId}/draft`)).toHaveLength(1);
+    expect(requests.filter(request => request === `GET /plugins/${encodeURIComponent(plugin.id)}`)).toHaveLength(1);
+    await act(async () => button("Change plugin icon").click());
+    await fill(input("Preset ID"), "image");
+    await act(async () => modalButton("Save icon").click());
+    expect(savedIcon).toEqual({ revision: "b".repeat(64), icon: { type: "preset", id: "image" } });
   });
   it("validates package paths and restores the default icon", async () => {
     await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));

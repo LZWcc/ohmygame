@@ -6,11 +6,7 @@ import {
   PLUGIN_ICON_MAX_BYTES,
   PLUGIN_ICON_MAX_DIMENSION,
 } from "../shared/plugin-icons.js";
-import {
-  isPluginIcon,
-  type PluginIcon,
-  type PluginDetail,
-} from "../shared/plugins.js";
+import { isPluginIcon, type PluginIcon } from "../shared/plugins.js";
 import { sniffImageType } from "./image-format.js";
 
 export async function validatePluginIconImage(
@@ -80,25 +76,18 @@ export async function readPluginIconAsset(
 
 export function registerPluginIconRoutes(
   app: FastifyInstance,
-  plugins: { read(id: string): Promise<PluginDetail | undefined> },
-  roots: readonly {
-    installedPath(id: string): string | undefined | Promise<string | undefined>;
+  stores: readonly {
+    readIcon(id: string): ReturnType<typeof readPluginIconAsset>;
   }[],
 ) {
   app.get<{ Params: { pluginId: string } }>(
     "/plugins/:pluginId/icon",
     async (request, reply) => {
       try {
-        const plugin = await plugins.read(request.params.pluginId);
-        if (!plugin?.installed || plugin.icon?.type !== "asset")
-          return reply.code(404).send({ error: "Plugin icon not found" });
-        const candidates = await Promise.all(
-          roots.map((store) => store.installedPath(plugin.id)),
+        const images = await Promise.all(
+          stores.map((store) => store.readIcon(request.params.pluginId)),
         );
-        const root = candidates.find(Boolean);
-        const image = root
-          ? await readPluginIconAsset(root, plugin.icon)
-          : undefined;
+        const image = images.find(Boolean);
         if (!image)
           return reply.code(404).send({ error: "Plugin icon not found" });
         return reply

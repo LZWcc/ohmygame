@@ -5,12 +5,8 @@ import {
   PLUGIN_ICON_PRESETS,
 } from "../shared/plugin-icons.js";
 import { isPluginIcon, type PluginDetail } from "../shared/plugins.js";
-import type { PluginIconUpdate } from "../shared/plugin-setup.js";
+import type { PluginIconChange } from "../shared/plugin-setup.js";
 import { PluginIcon, PLUGIN_PRESET_GLYPHS } from "./plugin-icons.js";
-
-type IconChange =
-  | Omit<Extract<PluginIconUpdate, { icon: unknown }>, "revision">
-  | Omit<Extract<PluginIconUpdate, { image: unknown }>, "revision">;
 
 export function PluginIconPicker({
   plugin,
@@ -25,7 +21,7 @@ export function PluginIconPicker({
   files: readonly { path: string }[];
   disabled: boolean;
   onClose: () => void;
-  onSave: (change: IconChange) => Promise<void>;
+  onSave: (change: PluginIconChange) => Promise<void>;
 }) {
   const titleId = useId(),
     pathsId = useId();
@@ -111,7 +107,7 @@ export function PluginIconPicker({
     icon: isPluginIcon(icon) ? icon : undefined,
     iconRevision: undefined,
   };
-  async function save(change?: IconChange) {
+  async function save(change?: PluginIconChange) {
     if (pending.current) return;
     setBusy(true);
     setError(undefined);
@@ -196,7 +192,6 @@ export function PluginIconPicker({
             <button
               key={value}
               type="button"
-
               aria-pressed={mode === value}
               disabled={busy || disabled}
               onClick={() => {
