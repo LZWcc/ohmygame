@@ -217,6 +217,25 @@ describe("OpenAI image connections", () => {
     ).not.toContainEqual(expect.objectContaining({ provider: "openai" }));
   });
 
+  it("starts with the default connection when saved image settings are unreadable", async () => {
+    vi.stubEnv("OPENAI_API_KEY", "");
+    const directory = await mkdtemp(path.join(tmpdir(), "ohmygame-openai-images-"));
+    directories.push(directory);
+    await writeFile(path.join(directory, "openai-images.json"), JSON.stringify({ version: 2, mode: "future" }));
+    const runtime = await ModelRuntime.create({
+      authPath: path.join(directory, "auth.json"),
+      modelsPath: path.join(directory, "models.json"),
+      modelsStorePath: path.join(directory, "catalog.json"),
+      allowModelNetwork: false,
+    });
+    const app = createApp({ dataDirectory: directory, piAgentDirectory: directory, createModelRuntime: async () => runtime });
+    apps.push(app);
+    await app.ready();
+    const response = await app.inject({ method: "GET", url: endpoint });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({ mode: "connection", configured: false, models: [] });
+  });
+
   it("supports image-only connections and restores saved models and visibility after restart", async () => {
     const { app, directory, save } = await fixture();
     await save({
