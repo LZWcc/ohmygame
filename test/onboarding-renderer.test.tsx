@@ -429,6 +429,28 @@ describe("first-run screens", () => {
     expect(api.startModelProviderLogin).toHaveBeenCalledWith("openai", "oauth");
   });
 
+  it("offers chat sign-in when OpenAI only has an image connection", async () => {
+    const openai: ProviderSummary = {
+      ...provider,
+      id: "openai",
+      name: "OpenAI",
+      configured: true,
+      languageConfigured: false,
+      imageConfigured: true,
+      status: "connected",
+      methods: [{ type: "oauth", label: "Sign in" }],
+    };
+    api.listProviders.mockResolvedValue([openai]);
+    await act(async () =>
+      root.render(
+        <Onboarding step="connect" onStepChange={vi.fn()} onFinish={vi.fn()} />,
+      ),
+    );
+    expect(container.textContent).not.toContain("Connected");
+    await act(async () => providerButton("OpenAI", "Sign in").click());
+    expect(api.startModelProviderLogin).toHaveBeenCalledWith("openai", "oauth");
+  });
+
   it("lets a failed step save be retried", async () => {
     const step = vi
       .fn()

@@ -112,7 +112,7 @@ export function Onboarding({
     setProviders(latest);
     const current = latest.find((item) => item.id === provider.id);
     if (!current) throw new Error(t("onboarding.providerUnavailable"));
-    if (current.configured) {
+    if (chatConnected(current)) {
       if (current.enabled === false) await setProviderEnabled(current.id, true);
       setRefresh((value) => value + 1);
     } else if (current.custom) {
@@ -226,7 +226,7 @@ export function Onboarding({
           {t("onboarding.readyWith", { name: model.name })}
         </p>
       ) : phase === "ready" &&
-        languageProviders.some((provider) => provider.configured) ? (
+        languageProviders.some(chatConnected) ? (
         <p className="onboarding-lede">{t("onboarding.needsLanguageModel")}</p>
       ) : null}
     </>
@@ -411,16 +411,16 @@ function ProviderPicker({
               {provider.name}
             </span>
             <div>
-              {provider.configured || provider.custom ? (
+              {chatConnected(provider) || provider.custom ? (
                 <button
                   className="onboarding-text-button"
                   type="button"
                   disabled={
-                    busy || (provider.configured && provider.enabled !== false)
+                    busy || (chatConnected(provider) && provider.enabled !== false)
                   }
                   onClick={() => onChoose(provider, "api_key")}
                 >
-                  {provider.configured
+                  {chatConnected(provider)
                     ? provider.enabled === false
                       ? t("common.enable")
                       : t("providers.status.connected")
@@ -486,6 +486,11 @@ export function OnboardingLoading({
       )}
     </main>
   );
+}
+
+/** OpenAI can have an image-only connection, which does not make chat ready. */
+function chatConnected(provider: ProviderSummary): boolean {
+  return provider.languageConfigured ?? provider.configured;
 }
 
 function errorMessage(cause: unknown) {
