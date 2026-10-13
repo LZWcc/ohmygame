@@ -140,7 +140,6 @@ export function PublishDialog({ project, publishing, justPublished = false, onCl
     try {
       await setProjectCoverMode(project.id, nextMode);
       setCoverMode(nextMode);
-      setSavedCover(undefined);
       setSavedCover(await getProjectCover(project.id));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -204,7 +203,7 @@ export function PublishDialog({ project, publishing, justPublished = false, onCl
             <button type="button" disabled={busy} onClick={() => { setPendingCover(undefined); setError(undefined); setCoverNotice(undefined); }}>Cancel selection</button>
             <button className="project-create-submit" type="button" disabled={busy} onClick={() => void applyCover()}>{coverOperation === "apply" ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}Apply cover</button>
           </div> : null}
-          {pendingCover || coverNotice ? <p className="publish-cover-status" role="status">{pendingCover ? "Apply or cancel the selected cover before publishing." : coverNotice}</p> : null}
+          <p className={`publish-cover-status${pendingCover || coverNotice ? "" : " visually-hidden"}`} role="status">{pendingCover ? "Apply or cancel the selected cover before publishing." : coverNotice}</p>
           {project.publication ? <p className="publish-cover-status">This is your local project cover. Publish an update to change the Community cover.</p> : null}
         </div>
         <label><span>Name</span><input ref={titleInput} value={title} maxLength={200} disabled={busy} required onChange={(event) => setTitle(event.target.value)} /></label>

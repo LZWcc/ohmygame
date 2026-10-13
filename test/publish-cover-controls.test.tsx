@@ -71,6 +71,30 @@ async function renderDialog() {
 }
 
 describe("publish cover controls", () => {
+  it.each(["auto", "custom"] as const)(
+    "keeps the cover visible while changing from %s mode",
+    async (mode) => {
+      getProjectCoverState.mockResolvedValue({ mode });
+      const toggle = await renderDialog();
+      const preview = container.querySelector("img");
+      let resolveCover!: (cover: Blob) => void;
+      getProjectCover.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveCover = resolve;
+        }),
+      );
+      await act(async () => toggle.click());
+      expect(toggle.disabled).toBe(true);
+      expect(container.querySelector("img")).toBe(preview);
+      expect(container.textContent).not.toContain("No cover selected");
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+      await act(async () =>
+        resolveCover(new Blob(["cover"], { type: "image/webp" })),
+      );
+      expect(toggle.disabled).toBe(false);
+    },
+  );
+
   it("turns automatic replacement off and on without an image upload", async () => {
     const toggle = await renderDialog();
     expect(toggle.checked).toBe(true);
@@ -104,6 +128,8 @@ describe("publish cover controls", () => {
 
   it("requires applying or cancelling a selected image before toggling", async () => {
     const toggle = await renderDialog();
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toBe("");
     const input =
       container.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(input, "files", {
@@ -115,6 +141,8 @@ describe("publish cover controls", () => {
     );
     expect(toggle.disabled).toBe(true);
     expect(toggle.checked).toBe(true);
+    expect(container.querySelector('[role="status"]')).toBe(status);
+    expect(status?.textContent).toContain("Apply or cancel");
     const apply = [
       ...container.querySelectorAll<HTMLButtonElement>("button"),
     ].find((button) => button.textContent === "Apply cover")!;
@@ -123,5 +151,7 @@ describe("publish cover controls", () => {
     expect(toggle.checked).toBe(false);
     expect(toggle.disabled).toBe(false);
     expect(container.textContent).toContain("Cover applied.");
+    expect(container.querySelector('[role="status"]')).toBe(status);
+    expect(status?.textContent).toBe("Cover applied.");
   });
 });

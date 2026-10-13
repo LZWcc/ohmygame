@@ -81,6 +81,20 @@ describe("project cover API", () => {
     expect((await app.inject({ method: "DELETE", url: "/projects/missing/cover" })).statusCode).toBe(404);
   });
 
+  it("retains an uploaded cover while automatic mode is enabled and restores it when disabled", async () => {
+    const { app, url, put } = await fixture();
+    const mode = (value: string) => app.inject({ method: "PUT", url: `${url}/state`, payload: { mode: value } });
+    await put(webp("automatic"), "auto");
+    await put(webp("uploaded"));
+    expect((await mode("auto")).statusCode).toBe(204);
+    await put(webp("new capture"), "auto");
+    expect((await app.inject({ method: "GET", url })).rawPayload).toEqual(webp("new capture"));
+    expect((await mode("custom")).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url })).rawPayload).toEqual(webp("uploaded"));
+    await put(webp("late capture"), "auto");
+    expect((await app.inject({ method: "GET", url })).rawPayload).toEqual(webp("uploaded"));
+  });
+
   it("restores the Interactive Story thumbnail fallback without stopping node thumbnail updates", async () => {
     const { app, project, url, put } = await fixture("interactive-story");
     await writePlayableFixtureWorkspace(project.workspacePath);

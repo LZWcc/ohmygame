@@ -275,9 +275,10 @@ Each project lives under the daemon data directory:
 ```text
 projects/<project-id>/
 ├── project.json   project identity and latest publication
-├── cover.webp     custom or frozen cover; its presence stops automatic replacement
+├── cover.webp     uploaded cover, retained while automatic mode is enabled
 ├── cover-auto.webp last automatic cover, retained when a custom cover is applied
-├── cover-state.json explicit automatic-off preference, including when no cover exists
+├── cover-frozen.webp frozen automatic cover or Interactive Story thumbnail
+├── cover-state.json explicit cover mode, including when no cover exists
 ├── preview-origin.json stable local preview port
 ├── workspace/     the project files (or an existing folder in the desktop app)
 └── session/       Pi session files, one per conversation
@@ -291,13 +292,16 @@ replacement. The **Automatic** switch beside **Cover** can also stop replacement
 without uploading an image: it freezes the current cover, including an
 Interactive Story's Scene thumbnail, or keeps the cover empty if none exists.
 Turning it back on returns to the last automatic cover, or an Interactive
-Story's Scene thumbnail when available. Automatic captures
+Story's Scene thumbnail when available. Uploaded covers are retained: turning
+**Automatic** off again restores the uploaded image. Without an uploaded image,
+turning it off freezes the current automatic cover. Automatic captures
 cannot overwrite a custom cover, including captures already in flight. Existing
 covers from older app versions are protected as custom covers until the user
-enables **Automatic**. Enabling it removes the custom or frozen cover and the
-explicit automatic-off preference; the automatic cover is retained separately.
-The preference survives restarts. Duplicating a project preserves both covers
-and the automatic-off preference.
+enables **Automatic**. Enabling it removes only the frozen snapshot and saves
+automatic mode; uploaded and automatic covers are retained separately.
+Unreadable JSON or invalid mode values fall back to custom mode when an uploaded
+cover exists, or automatic mode otherwise. The preference survives restarts.
+Duplicating a project preserves the covers and the selected mode.
 The Community cover is a snapshot in the published Deployment and changes only
 when an update is published; publication details show that snapshot.
 
