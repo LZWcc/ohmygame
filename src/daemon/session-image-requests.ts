@@ -4,7 +4,8 @@ import { convertResponsesMessages } from "@earendil-works/pi-ai/api/openai-respo
 import { createGrammarToolInputProperties } from "@earendil-works/pi-ai/api/constrained-sampling";
 import { getDeclaredTools, normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { isDeepSeekFileModel } from "./deepseek-image-files.js";
-import { isOfficialOpenAIResponses, OpenAISessionTransport } from "./openai-session-transport.js";
+import { prefersResponsesWebSocket, OpenAISessionTransport } from "./openai-session-transport.js";
+import type { ResponsesTransportMode } from "../shared/contracts.js";
 import { OpenAISessionFiles } from "./openai-session-files.js";
 import { SessionImages, localImageError, ImageBudgetError, MODEL_REQUEST_HIGH_BYTES } from "./session-images.js";
 
@@ -51,25 +52,28 @@ function wrapInlineImageFetch(delegate: typeof fetch, images: SessionImages): ty
 
 /** Install outside Pi's extension runner: preparation failures must stop the provider request. */
 export function installSessionImageRequests(session: AgentSession, images: SessionImages, agentDir: string,
-  transport = new OpenAISessionTransport(images, new OpenAISessionFiles(path.join(agentDir, "openai-image-files")))): void {
+  options: { transport?: OpenAISessionTransport; transportMode?: (provider: string) => ResponsesTransportMode } = {}): void {
+  const transport = options.transport ?? new OpenAISessionTransport(images, new OpenAISessionFiles(path.join(agentDir, "openai-image-files")));
+  const transportMode = options.transportMode ?? (() => "auto");
   const lifetime = new AbortController();
-  let activeOpenAIRequest = false;
   const stream = session.agent.streamFunction;
   const dispose = session.dispose.bind(session);
   session.dispose = () => { lifetime.abort(new Error("Session disposed")); transport.dispose(); dispose(); };
   const warmingMode = session.settingsManager.getCacheWarmingMode.bind(session.settingsManager);
   // A warming response would advance the connection-local lineage independently of the agent.
   // WS already retains request state; suppress full-history background replay on this route.
-  session.settingsManager.getCacheWarmingMode = () => activeOpenAIRequest || session.model?.api === "openai-responses"
-    && isOfficialOpenAIResponses(`${session.model.baseUrl.replace(/\/$/, "")}/responses`) ? "off" : warmingMode();
+  session.settingsManager.getCacheWarmingMode = () => session.model?.api === "openai-responses"
+    && prefersResponsesWebSocket(`${session.model.baseUrl.replace(/\/$/, "")}/responses`, { mode: transportMode(session.model.provider), transport: session.agent.transport }) ? "off" : warmingMode();
   session.agent.streamFunction = async (model, context, options) => {
     options = { ...options, signal: options?.signal ? AbortSignal.any([options.signal, lifetime.signal]) : lifetime.signal };
-    const openai = model.api === "openai-responses" && isOfficialOpenAIResponses(`${model.baseUrl.replace(/\/$/, "")}/responses`);
-    activeOpenAIRequest = openai;
+    const openai = model.api === "openai-responses";
+    const endpoint = `${model.baseUrl.replace(/\/$/, "")}/responses`;
+    const mode = transportMode(model.provider);
     if (isDeepSeekFileModel(model)) return stream(model, context, options);
     const prepared = await images.prepare(context, model, session.settingsManager.getImageAutoResize());
     const delegate = options?.fetch ?? globalThis.fetch;
     const fetch = openai ? transport.wrapFetch(delegate, {
+      endpoint, mode,
       transport: options?.transport,
       cacheRetention: options?.cacheRetention,
       connectTimeoutMs: options?.websocketConnectTimeoutMs ?? session.settingsManager.getWebSocketConnectTimeoutMs(),

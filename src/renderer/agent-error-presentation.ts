@@ -31,7 +31,8 @@ export function agentErrorDiagnosticRows(error: ThreadItemError): Array<[string,
   if (details.provider) rows.push(["Provider", details.provider]);
   if (details.model) rows.push(["Model", details.model]);
   if (details.endpoint) rows.push(["Endpoint", details.endpoint]);
-  if (details.statusCode !== undefined) rows.push(["HTTP status", String(details.statusCode)]);
+  if (details.transport) rows.push(["Transport", details.transport === "websocket" ? "WebSocket" : "HTTP / SSE"]);
+  if (details.statusCode !== undefined) rows.push([details.transport === "websocket" ? "Provider status" : "HTTP status", String(details.statusCode)]);
   if (details.errorCode) rows.push(["Error code", details.errorCode]);
   if (details.requestId) rows.push(["Request ID", details.requestId]);
   if (details.retryAttempts !== undefined) rows.push(["Retry attempts", String(details.retryAttempts)]);

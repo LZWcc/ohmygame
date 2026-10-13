@@ -21,6 +21,8 @@ import {
   type ModelAuthEvent,
   type ModelAuthMethod,
   type ModelProviderEndpointSettings,
+  type ResponsesTransportSettings,
+  type ResponsesTransportMode,
   type ProviderModelSettings,
   type Model3DDefinition,
   type CustomProviderModel,
@@ -298,6 +300,13 @@ export async function removeCustomProviderModel(providerId: string, modelId: str
 
 export async function getOpenAIEndpointSettings(): Promise<ModelProviderEndpointSettings> {
   return request("/settings/models/providers/openai/endpoint");
+}
+
+export async function getResponsesTransport(provider: string): Promise<ResponsesTransportSettings> {
+  return request(`/settings/models/providers/${encodeURIComponent(provider)}/transport`);
+}
+export async function updateResponsesTransport(provider: string, mode: ResponsesTransportMode): Promise<ResponsesTransportSettings> {
+  return request(`/settings/models/providers/${encodeURIComponent(provider)}/transport`, { method: "PUT", body: JSON.stringify({ mode }) });
 }
 
 export async function updateOpenAIEndpointSettings(baseUrl: string): Promise<ModelProviderEndpointSettings> {

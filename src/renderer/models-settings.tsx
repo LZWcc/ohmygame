@@ -33,6 +33,7 @@ import {
 import { PROVIDER_ICONS } from "./provider-icons.js";
 import { CustomProviderDialog, PROVIDER_API_LABELS, type CustomProviderField } from "./custom-provider-dialog.js";
 import { ProviderModels } from "./provider-models.js";
+import { ProviderResponsesTransport } from "./responses-transport-settings.js";
 import { Provider3DBalance } from "./provider-3d-balance.js";
 import { MODEL3D_CONNECTION_ID } from "../shared/model3d-operations.js";
 import { GlobalMediaModelDefaults } from "./media-model-defaults.js";
@@ -563,6 +564,7 @@ function CustomProviderDetail({ provider, onBack, onRemoved }: { provider: Provi
         <button className="icon-button settings-provider-setting-edit" type="button" aria-label={`Edit ${label}`} data-tooltip={`Edit ${label}`} disabled={deleting || openingEditor || Boolean(editing)} onClick={() => void openEditor(field)}><Pencil size={15} aria-hidden="true" /></button>
       </div>)}
     </div> : !error ? <div className="settings-loading"><LoaderCircle className="spin" size={16} />Loading configuration</div> : null}
+    {settings && (settings.api === "openai-responses" || settings.models.some((model) => model.api === "openai-responses")) ? <ProviderResponsesTransport key={provider.id} providerId={provider.id} disabled={deleting || openingEditor || Boolean(editing)} /> : null}
     {error || deletion.error ? <p className="settings-error" role="alert">{deletion.error ?? error}</p> : null}
     {provider.configured ? [...balanceConnections].map(([connection, model]) => <Provider3DBalance key={connection} model={{ provider: provider.id, id: model.id }} label={balanceConnections.size > 1 ? `API balance · ${model.name}` : undefined} />) : null}
     {settings ? <ProviderModels key={modelsRevision} providerId={provider.id} onEditModels={() => void openEditor("models")} /> : null}
@@ -720,6 +722,7 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
       </div> : null}
       {displayedError ? <p className="settings-error" role="alert">{displayedError}</p> : null}
       {notice ? <p className="settings-success" role="status">{notice}</p> : null}
+      {provider.id === "openai" ? <ProviderResponsesTransport providerId={provider.id} disabled={deletion.busy || Boolean(editing)} /> : null}
       <ProviderModels key={modelsRevision} providerId={provider.id} />
       {provider.capabilities.includes("image") ? <ProviderImageModels key={`images-${modelsRevision}`} providerId={provider.id} /> : null}
     </section>
