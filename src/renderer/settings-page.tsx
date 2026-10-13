@@ -38,13 +38,14 @@ const SETTINGS_SECTIONS: Array<{ section: SettingsSection; label: string; icon: 
   { section: "about", label: t("settings.nav.about"), icon: InfoCircle },
 ];
 
-export function SettingsPage({ section, pluginId, onBack, onSectionChange, onPluginChange, onTryPlugin }: {
+export function SettingsPage({ section, pluginId, onBack, onSectionChange, onPluginChange, onTryPlugin, onOpenOnboarding }: {
   section: SettingsSection;
   pluginId?: string;
   onBack: () => void;
   onSectionChange: (section: SettingsSection) => void;
   onPluginChange: (pluginId?: string) => void;
   onTryPlugin: (plugin: PluginDetail, prompt: string, projectId?: string) => Promise<void>;
+  onOpenOnboarding?: () => void;
 }) {
   const [modelsView, setModelsView] = useState<ModelsView>({ page: "providers" });
   const navigation = useRef<HTMLElement>(null);
@@ -93,7 +94,7 @@ export function SettingsPage({ section, pluginId, onBack, onSectionChange, onPlu
           {section === "web-search" ? <WebSearchSettingsPanel /> : null}
           {section === "network" ? <NetworkSettingsPanel /> : null}
           {section === "plugins" ? <PluginsSettings pluginId={pluginId} onPluginChange={onPluginChange} onTryPlugin={onTryPlugin} /> : null}
-          {section === "about" ? <AboutSettings onOpenNetwork={() => chooseSection("network")} /> : null}
+          {section === "about" ? <AboutSettings onOpenNetwork={() => chooseSection("network")} onOpenOnboarding={onOpenOnboarding} /> : null}
         </div>
       </section>
     </main>
@@ -242,7 +243,7 @@ function AccountSettings() {
   );
 }
 
-function AboutSettings({ onOpenNetwork }: { onOpenNetwork: () => void }) {
+function AboutSettings({ onOpenNetwork, onOpenOnboarding }: { onOpenNetwork: () => void; onOpenOnboarding?: () => void }) {
   const [update, setUpdate] = useState<DesktopUpdateState | null>(null);
   const [copied, setCopied] = useState(false);
   const updates = window.ohMyGameDesktop?.updates;
@@ -281,6 +282,7 @@ function AboutSettings({ onOpenNetwork }: { onOpenNetwork: () => void }) {
   return (
     <section className="settings-panel settings-overview-panel">
       <header className="settings-panel-header"><h3>{t("settings.nav.about")}</h3></header>
+      {onOpenOnboarding ? <div className="settings-detail-section"><button className="settings-secondary-button" type="button" onClick={onOpenOnboarding}>{t("onboarding.reopen")}</button></div> : null}
       <div className="settings-about-list">
         <div className="settings-about-row">
           <span>{t("settings.about.version")}</span>

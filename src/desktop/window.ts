@@ -1,4 +1,4 @@
-import { BrowserWindow, nativeTheme, shell } from "electron";
+import { BrowserWindow, nativeTheme, screen, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { DaemonRuntime } from "./daemon-process.js";
@@ -10,7 +10,7 @@ const repositoryRoot = path.resolve(moduleDirectory, "../..");
 
 export function windowsTitleBarOverlay(isDark: boolean) {
   return {
-    color: isDark ? "#1f1f1f" : "#f7f7f7",
+    color: isDark ? "#1f1f1f" : "#ffffff",
     symbolColor: isDark ? "#ffffff" : "#202020",
     height: 32,
   };
@@ -53,6 +53,20 @@ export function fitPlaytestContentSize(viewport: { width: number; height: number
   };
 }
 
+function defaultWindowBounds(minWidth = 960, minHeight = 640) {
+  const workArea = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const width = Math.min(1200, Math.floor(workArea.width * 0.9));
+  const height = Math.min(780, Math.floor(workArea.height * 0.88));
+  return {
+    width,
+    height,
+    minWidth: Math.min(minWidth, width),
+    minHeight: Math.min(minHeight, height),
+    x: workArea.x + Math.round((workArea.width - width) / 2),
+    y: workArea.y + Math.round((workArea.height - height) / 2),
+  };
+}
+
 export async function createDesktopWindow(options: CreateWindowOptions): Promise<BrowserWindow> {
   const rendererTarget = options.rendererUrl
     ? new URL(options.rendererUrl).href
@@ -85,12 +99,13 @@ export async function createDesktopWindow(options: CreateWindowOptions): Promise
     : {};
   const window = new BrowserWindow({
     icon: path.resolve(repositoryRoot, "build/icon.ico"),
-    width: options.contentSize?.width ?? 1440,
-    height: options.contentSize?.height ?? 900,
-    minWidth: options.minWidth ?? 960,
-    minHeight: options.minHeight ?? 640,
-    ...(options.contentSize ? { useContentSize: true } : {}),
-    backgroundColor: "#171717",
+    ...(options.contentSize ? {
+      ...options.contentSize,
+      minWidth: options.minWidth ?? 960,
+      minHeight: options.minHeight ?? 640,
+      useContentSize: true,
+    } : defaultWindowBounds(options.minWidth, options.minHeight)),
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#171717" : "#ffffff",
     show: false,
     ...platformWindowOptions,
     webPreferences: {

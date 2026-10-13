@@ -12,6 +12,20 @@ vi.doMock(path.resolve("src/renderer/api.ts"), async () => ({
   ...(await vi.importActual(path.resolve("src/renderer/api.ts"))),
   getResponsesTransport: vi.fn(async () => ({ mode: "auto" })),
   updateResponsesTransport: vi.fn(),
+  listProviders: vi.fn(async () => [
+    {
+      id: "deepseek",
+      name: "DeepSeek",
+      configured: true,
+      capabilities: ["language"],
+      status: "connected",
+      methods: [],
+    },
+  ]),
+  listModels: vi.fn(async () => ({
+    models: [],
+    defaultReasoningLevel: "medium",
+  })),
 }));
 const { language, t, tNodes } = await import("../src/renderer/i18n.js");
 const { ProviderResponsesTransport } =
@@ -21,6 +35,7 @@ const { CanvasTableAI, ExpandedCanvasTable } =
 const { CanvasTableStorage } =
   await import("../src/renderer/canvas-table-storage.js");
 const { createCanvasTable } = await import("../src/shared/canvas-table.js");
+const { Onboarding } = await import("../src/renderer/onboarding.js");
 const { ModelSelector } = await import("../src/renderer/model-selector.js");
 
 let root: ReturnType<typeof createRoot> | undefined;
@@ -86,6 +101,33 @@ it("shows table adoption and CSV replacement warnings in Chinese", () => {
   );
   expect(editor).toContain("导入 CSV 会替换表格，可通过撤销恢复。");
   expect(editor).not.toContain("Paste cells from a spreadsheet");
+});
+
+it("translates both onboarding steps and preserves provider names", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+  const props = { onStepChange: vi.fn(), onFinish: vi.fn() };
+  await act(async () => root!.render(<Onboarding step="welcome" {...props} />));
+  expect(host.querySelector("h1")?.textContent).toBe("你的专属游戏工作室。");
+  expect(host.querySelector("footer")?.textContent).toBe("下一步");
+  await act(async () => root!.render(<Onboarding step="connect" {...props} />));
+  expect(host.querySelector("h1")?.textContent).toBe("选择你的服务商。");
+  expect(host.querySelector('[aria-label="DeepSeek"]')?.textContent).toBe(
+    "DeepSeek已连接",
+  );
+  expect(host.querySelector("footer")?.textContent).toBe("开始创作跳过并开始");
+  await act(async () =>
+    host
+      .querySelector<HTMLButtonElement>('[aria-label="添加自定义服务商"]')!
+      .click(),
+  );
+  expect(host.querySelector("h1")?.textContent).toBe("添加你的服务商。");
+  expect(host.querySelector('[role="dialog"]')).toBeNull();
+  expect(
+    host.querySelector('[aria-label="自定义服务商"]')?.textContent,
+  ).toContain("显示名称");
 });
 
 it("localizes the separate reasoning button while keeping the xhigh label", () => {

@@ -10,6 +10,8 @@
   --surface-hover: #303030;
   --border: #303030;
   --border-strong: #3a3a3a;
+  --scrollbar-thumb: rgb(255 255 255 / 8%);
+  --scrollbar-thumb-hover: rgb(255 255 255 / 14%);
   --search-border: rgb(255 255 255 / 8%);
   --text: #f1f3f5;
   --text-secondary: #969aa3;
@@ -45,12 +47,14 @@
 :root[data-appearance="light"] {
   color: #202020;
   color-scheme: light;
-  --canvas: #f7f7f7;
+  --canvas: #ffffff;
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --surface-hover: #f4f4f4;
   --border: #e1e1e1;
   --border-strong: #c9c9c9;
+  --scrollbar-thumb: rgb(0 0 0 / 10%);
+  --scrollbar-thumb-hover: rgb(0 0 0 / 16%);
   --search-border: rgb(0 0 0 / 7%);
   --text: #202020;
   --text-secondary: #626262;
@@ -118,6 +122,28 @@
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 html,
@@ -146,7 +172,7 @@ body {
 }
 
 :root[data-appearance="light"] .desktop-window-frame {
-  --window-chrome-background: #f7f7f7;
+  --window-chrome-background: #ffffff;
   --window-chrome-text: #202020;
   --window-chrome-hover: rgb(0 0 0 / 7%);
 }
@@ -673,7 +699,7 @@ body {
   min-height: 0;
   overflow: auto;
   padding: 0 40px 48px;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -1822,7 +1848,7 @@ select.settings-search-input {
   max-height: 420px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   border-block: 1px solid var(--border);
 }
 
@@ -2543,7 +2569,7 @@ button.home-nav-item-active:hover {
   min-height: 0;
   overflow: auto;
   padding: 161px 32px 44px;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -2587,7 +2613,7 @@ button.home-nav-item-active:hover {
   min-height: 0;
   overflow: auto;
   padding: 0 36px 48px;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -4417,7 +4443,7 @@ button.home-nav-item-active:hover {
   padding: 6px 20px 20px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .connection-dialog .project-settings-field-row {
   grid-template-columns: minmax(0, 1fr) 150px;
@@ -9183,7 +9209,7 @@ button {
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
 }
@@ -9214,7 +9240,7 @@ button {
   flex-direction: column;
   overflow: auto;
   padding: 0 6px 6px;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -11197,7 +11223,7 @@ button {
   border: 1px solid var(--menu-border);
   border-radius: 16px;
   background: var(--menu-surface);
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -11818,7 +11844,7 @@ button {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -11874,7 +11900,7 @@ button {
   flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-color: var(--border) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
   scrollbar-width: thin;
 }
 
@@ -11911,7 +11937,7 @@ button {
 .model-selector-reasoning-menu::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
-  background: var(--border-strong);
+  background: var(--scrollbar-thumb);
   background-clip: padding-box;
 }
 
@@ -14467,30 +14493,6 @@ button {
   color: #363636;
 }
 
-:root[data-appearance="light"] * {
-  scrollbar-color: #c2c5c2 transparent;
-}
-
-:root[data-appearance="light"] *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-:root[data-appearance="light"] *::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-:root[data-appearance="light"] *::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background: #c2c5c2;
-  background-clip: padding-box;
-}
-
-:root[data-appearance="light"] *::-webkit-scrollbar-thumb:hover {
-  background-color: #aeb2ae;
-}
-
 :root[data-appearance="light"] .markdown-code-block {
   background: #f7f7f7;
 }
@@ -15224,7 +15226,7 @@ button {
 .custom-provider-dialog { display: flex; width: min(580px, 100%); flex-direction: column; overflow: hidden; }
 .custom-provider-dialog > header { flex-shrink: 0; }
 .custom-provider-dialog > form { display: flex; min-height: 0; flex-direction: column; gap: 0; padding: 0; }
-.custom-provider-dialog-body { display: grid; min-height: 0; gap: 18px; padding: 6px 20px 20px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.custom-provider-dialog-body { display: grid; min-height: 0; gap: 18px; padding: 6px 20px 20px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
 .custom-provider-dialog footer { flex-shrink: 0; padding: 12px 20px 16px; border-top: 1px solid var(--border); }
 .custom-provider-hint { margin: 0; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
 .custom-provider-dialog label > small, .custom-provider-dialog label > span > small { color: var(--text-faint); font-size: 10px; font-weight: 400; line-height: 1.4; }
@@ -15270,7 +15272,7 @@ button {
 .custom-provider-model-picker > .custom-provider-hint { overflow-wrap: anywhere; }
 .custom-provider-model-picker .custom-provider-model-search { display: flex; min-width: 0; align-items: center; gap: 8px; padding-left: 10px; border-radius: var(--radius); background: var(--control-surface); }
 .custom-provider-model-search input { min-width: 0; flex: 1; background: transparent; padding-left: 0; font-family: inherit; }
-.custom-provider-model-results { max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.custom-provider-model-results { max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
 .custom-provider-model-results.is-editing { max-height: none; overflow: visible; }
 .custom-provider-model-picker :is(.custom-provider-model-choice, .custom-provider-select-all) { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .custom-provider-model-choice { min-height: 48px; padding: 9px 10px; }

@@ -186,22 +186,32 @@ not code-signed yet, so Windows may show a SmartScreen warning during install.
 
 ### First run
 
-OhMyGame ships without a model. Connect one before your first prompt:
+![First-run welcome and provider connection screens](docs/assets/first-run-onboarding.png)
 
-1. **Open Settings → Providers & Models** and connect a provider for the
-   agent. Sign in with a subscription you already have, such as ChatGPT
-   Plus/Pro or Anthropic, or paste an API key. OpenRouter is the
-   quickest start: one key covers language, image, and video models.
+OhMyGame ships without a model. On first launch, a small game world forms and
+transforms into the OhMyGame logo. The wordmark, **Your own game studio.**, and
+**Next** appear in sequence over about five seconds.
+Click **Next** to connect a model before your first prompt:
+
+1. **Connect a language model.** **Choose your provider** lists available
+   providers with their sign-in or API key options. Use the **+** button beside
+   search to add a custom or local compatible endpoint in the same window.
+   **Start creating** becomes available when a language model is ready. You can
+   also choose **Skip and start** to enter without setup and configure a model
+   later in **Settings → Providers & Models**. Saved connections show **Connected**.
+   Setup resumes where you left off; existing installations go straight to
+   the studio.
 2. **Add media providers if you want them.** The agent can design and build a
-   game with only a language model. Generating art, video, or 3D needs its own
-   provider:
+   game with only a language model. Connect image, video, and 3D providers and
+   choose default models in **Settings → Providers & Models** whenever you
+   need them. Generating art, video, or 3D needs its own provider:
 
    | To make                       | Connect                                                             |
    | ----------------------------- | ------------------------------------------------------------------- |
    | Design docs, code, playtests  | Any language model provider                                         |
    | Images and sprites            | OpenAI (API key), OpenRouter, or Volcengine Ark / BytePlus ModelArk |
    | Video                         | OpenRouter, or Volcengine Ark / BytePlus ModelArk                   |
-   | 3D models, rigging, animation | Meshy                                                               |
+   | 3D models, rigging, animation | Meshy, Tripo, or Hyper3D (capabilities vary by provider)              |
 
    Signing in with ChatGPT does not cover image generation. In the OpenAI
    provider's **Image models** section, configure a separate API key and Base URL,
@@ -214,6 +224,7 @@ OhMyGame ships without a model. Connect one before your first prompt:
 
 Web search works without setup. Sign in under **Account** only when you want
 to publish a game; making games locally needs no account.
+Reopen the welcome from **Settings → About → View getting started**.
 
 ### Run from source
 
@@ -247,7 +258,7 @@ crash reports (Sentry, no personal data). Builds from source send no telemetry.
 
 ## Roadmap
 
-We're working on first-run setup, plain-language playtest reports, remixing
+We're working on plain-language playtest reports, remixing
 games from the Community, and Intel Mac / Linux builds. See
 [Issues](https://github.com/WhiteTowerAI/ohmygame/issues) for what's next, and
 vote with 👍 on what matters to you. Want to help? Look for

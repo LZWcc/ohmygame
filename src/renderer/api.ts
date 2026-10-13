@@ -79,9 +79,18 @@ import type { DesktopClipboardFile } from "../shared/file-transfer.js";
 import type { WebGamePlayerBridge } from "../shared/web-game-player.js";
 import type { NetworkConnectionTest, NetworkSettings, NetworkSettingsState } from "../shared/network-settings.js";
 import { composerDrafts } from "./composer-drafts.js";
+import type { OnboardingState, UpdateOnboardingRequest } from "../shared/onboarding.js";
 import { t } from "./i18n.js";
 
 const API_BASE = "/api";
+
+export function getOnboardingState(): Promise<OnboardingState> {
+  return request("/settings/onboarding");
+}
+
+export function updateOnboardingState(state: UpdateOnboardingRequest): Promise<OnboardingState> {
+  return request("/settings/onboarding", { method: "PUT", body: JSON.stringify(state) });
+}
 
 export function getNetworkSettings(): Promise<NetworkSettingsState> {
   return request("/settings/network");
