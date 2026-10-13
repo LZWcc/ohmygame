@@ -7,6 +7,7 @@ import {
 import { isPluginIcon, type PluginDetail } from "../shared/plugins.js";
 import type { PluginIconChange } from "../shared/plugin-setup.js";
 import { PluginIcon, PLUGIN_PRESET_GLYPHS } from "./plugin-icons.js";
+import { t } from "./i18n.js";
 
 export function PluginIconPicker({
   plugin,
@@ -118,7 +119,7 @@ export function PluginIconPicker({
             const reader = new FileReader();
             reader.onload = () => resolve(String(reader.result).split(",")[1]);
             reader.onerror = () =>
-              reject(new Error("The image could not be read"));
+              reject(new Error(t("pluginIconPicker.readFailed")));
             reader.readAsDataURL(file);
           });
           change = {
@@ -131,7 +132,7 @@ export function PluginIconPicker({
           };
         } else if (isPluginIcon(icon)) change = { icon };
       }
-      if (!change) throw new Error("Choose a plugin icon");
+      if (!change) throw new Error(t("pluginIconPicker.chooseIcon"));
       await onSave(change);
       onClose();
     } catch (cause) {
@@ -141,7 +142,7 @@ export function PluginIconPicker({
     }
   }
   const matches = PLUGIN_ICON_PRESETS.filter((item) =>
-    `${item.id} ${item.label} ${item.keywords}`
+    `${item.id} ${item.label} ${t(`pluginIcons.${item.id}`)} ${item.keywords}`
       .toLowerCase()
       .includes(search.trim().toLowerCase()),
   );
@@ -168,7 +169,7 @@ export function PluginIconPicker({
                 src={localImage}
                 width={36}
                 height={36}
-                alt="Icon preview"
+                alt={t("pluginIconPicker.preview")}
               />
             </span>
           ) : (
@@ -179,14 +180,14 @@ export function PluginIconPicker({
             />
           )}
           <div>
-            <h2 id={titleId}>Plugin icon</h2>
+            <h2 id={titleId}>{t("pluginIconPicker.title")}</h2>
             <p>{plugin.displayName}</p>
           </div>
         </header>
         <div
           className="plugin-icon-modes"
           role="group"
-          aria-label="Icon source"
+          aria-label={t("pluginIconPicker.source")}
         >
           {(["preset", "upload", "path"] as const).map((value) => (
             <button
@@ -200,13 +201,7 @@ export function PluginIconPicker({
                 setError(undefined);
               }}
             >
-              {
-                {
-                  preset: "Presets",
-                  upload: "Upload image",
-                  path: "Package image",
-                }[value]
-              }
+              {t(`pluginIconPicker.${value}`)}
             </button>
           ))}
         </div>
@@ -220,12 +215,12 @@ export function PluginIconPicker({
             {mode === "preset" ? (
               <>
                 <label>
-                  Search icons
+                  {t("pluginIconPicker.search")}
                   <input
-                    aria-label="Search icons"
+                    aria-label={t("pluginIconPicker.search")}
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search by name or purpose"
+                    placeholder={t("pluginIconPicker.searchPlaceholder")}
                   />
                 </label>
                 <div className="plugin-icon-grid">
@@ -235,24 +230,26 @@ export function PluginIconPicker({
                       <button
                         key={item.id}
                         type="button"
-                        aria-label={`${item.label} (${item.id})`}
+                        aria-label={`${t(`pluginIcons.${item.id}`)} (${item.id})`}
                         aria-pressed={presetId === item.id}
                         title={item.id}
                         onClick={() => setPresetId(item.id)}
                       >
                         <Glyph size={23} />
-                        <span>{item.label}</span>
+                        <span>{t(`pluginIcons.${item.id}`)}</span>
                       </button>
                     );
                   })}
                 </div>
                 {!matches.length ? (
-                  <p className="plugin-icon-help">No matching icons</p>
+                  <p className="plugin-icon-help">
+                    {t("pluginIconPicker.noMatches")}
+                  </p>
                 ) : null}
                 <label>
-                  Preset ID
+                  {t("pluginIconPicker.presetId")}
                   <input
-                    aria-label="Preset ID"
+                    aria-label={t("pluginIconPicker.presetId")}
                     value={presetId}
                     onChange={(event) =>
                       setPresetId(event.target.value.trim().toLowerCase())
@@ -262,18 +259,18 @@ export function PluginIconPicker({
                 </label>
                 {!valid ? (
                   <p className="plugin-icon-help">
-                    Choose a preset from the grid or enter its ID.
+                    {t("pluginIconPicker.presetHelp")}
                   </p>
                 ) : null}
               </>
             ) : mode === "upload" ? (
               <>
                 <label>
-                  Image file
+                  {t("pluginIconPicker.imageFile")}
                   <input
                     type="file"
                     accept="image/png,image/webp,.png,.webp"
-                    aria-label="Plugin icon image"
+                    aria-label={t("pluginIconPicker.imageInput")}
                     onChange={(event) => {
                       const selected = event.target.files?.[0];
                       setFile(undefined);
@@ -284,7 +281,7 @@ export function PluginIconPicker({
                         selected.size > PLUGIN_ICON_MAX_BYTES ||
                         !selected.size
                       ) {
-                        setError("Choose a PNG or WebP image up to 1 MB");
+                        setError(t("pluginIconPicker.invalidFile"));
                         return;
                       }
                       setFile(selected);
@@ -292,16 +289,15 @@ export function PluginIconPicker({
                   />
                 </label>
                 <p className="plugin-icon-help">
-                  PNG or WebP, up to 1 MB and 2048 × 2048 pixels. A square image
-                  with a transparent background works best.
+                  {t("pluginIconPicker.fileHelp")}
                 </p>
               </>
             ) : (
               <>
                 <label>
-                  Image path
+                  {t("pluginIconPicker.imagePath")}
                   <input
-                    aria-label="Plugin icon path"
+                    aria-label={t("pluginIconPicker.pathInput")}
                     value={assetPath}
                     onChange={(event) => setAssetPath(event.target.value)}
                     placeholder="./assets/icon.png"
@@ -317,7 +313,7 @@ export function PluginIconPicker({
                     ))}
                 </datalist>
                 <p className="plugin-icon-help">
-                  Choose a PNG or WebP file inside this plugin.
+                  {t("pluginIconPicker.pathHelp")}
                 </p>
               </>
             )}
@@ -333,17 +329,17 @@ export function PluginIconPicker({
               disabled={busy || disabled}
               onClick={() => void save({ icon: null })}
             >
-              Use default
+              {t("pluginIconPicker.useDefault")}
             </button>
             <button type="button" disabled={busy || disabled} onClick={onClose}>
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               className="plugin-install-submit"
               type="submit"
               disabled={busy || disabled || !valid}
             >
-              {busy ? "Saving…" : "Save icon"}
+              {busy ? t("common.saving") : t("pluginIconPicker.save")}
             </button>
           </footer>
         </form>

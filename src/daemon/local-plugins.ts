@@ -285,8 +285,10 @@ export async function inspectPluginBundle(
 ): Promise<PluginDetail> {
   await validatePluginBundle(pluginRoot);
   const manifest = normalizedManifest ?? await readPluginManifest(pluginRoot);
-  const iconAsset = await readPluginIconAsset(pluginRoot, manifest.interface?.icon).catch(cause => {
-    throw new LocalPluginError(`Plugin icon: ${errorMessage(cause)}`);
+  let icon = manifest.interface?.icon;
+  const iconAsset = await readPluginIconAsset(pluginRoot, icon).catch(() => {
+    icon = undefined;
+    return undefined;
   });
   const skills = manifest.skills
     ? (await Promise.all((Array.isArray(manifest.skills) ? manifest.skills : [manifest.skills]).map((skillPath) => skillComponents(pluginRoot, skillPath)))).flat()
@@ -301,7 +303,7 @@ export async function inspectPluginBundle(
     displayName: manifest.interface?.displayName ?? displayName(manifest.name),
     description: manifest.interface?.shortDescription ?? manifest.description,
     longDescription: manifest.interface?.longDescription,
-    icon: manifest.interface?.icon,
+    icon,
     iconRevision: iconAsset?.revision,
     version: manifest.version,
     marketplace: identity.marketplace,
@@ -318,7 +320,7 @@ export async function inspectPluginBundle(
   };
 }
 
-async function readPluginManifest(pluginRoot: string): Promise<PluginManifest> {
+export async function readPluginManifest(pluginRoot: string): Promise<PluginManifest> {
   const manifestPath = path.join(pluginRoot, PLUGIN_MANIFEST_PATH);
   let value: unknown;
   try {

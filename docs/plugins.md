@@ -55,6 +55,14 @@ requests in the desktop app. Missing or failed image requests show the default
 package glyph. Packages without an icon retain the existing built-in/default
 appearance.
 
+Missing, oversized or undecodable icon images in an imported or installed
+package do not prevent the plugin from installing or loading; their icon
+metadata is omitted so the default glyph appears. Builder preparation and icon
+saves still reject invalid assets.
+Installed image responses use content-based ETags for private revalidation.
+Successful image decoding is reused by content hash; each read still checks the
+current file and its path.
+
 In Plugin Builder's Overview, click the icon beside the plugin name to search
 presets, enter a preset ID, upload an image, choose a package image path, or
 restore the default. This editor is available after a valid draft has been

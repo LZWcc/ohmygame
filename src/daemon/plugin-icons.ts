@@ -9,6 +9,10 @@ import {
 import { isPluginIcon, type PluginIcon } from "../shared/plugins.js";
 import { sniffImageType } from "./image-format.js";
 
+// Cache successful decodes by content. Reads still check paths and current bytes.
+const validatedIcons = new Set<string>();
+const VALIDATED_ICON_CACHE_LIMIT = 128;
+
 export async function validatePluginIconImage(
   bytes: Buffer,
   expected?: string,
@@ -21,31 +25,33 @@ export async function validatePluginIconImage(
     (expected && mediaType !== expected)
   )
     throw new Error("Choose a PNG or WebP plugin icon");
+  const revision = createHash("sha256").update(bytes).digest("hex");
   const { PhotonImage } = await import("@silvia-odwyer/photon-node");
-  let image: InstanceType<typeof PhotonImage> | undefined;
-  try {
-    image = PhotonImage.new_from_byteslice(bytes);
-    if (
-      !image.get_width() ||
-      !image.get_height() ||
-      image.get_width() > PLUGIN_ICON_MAX_DIMENSION ||
-      image.get_height() > PLUGIN_ICON_MAX_DIMENSION
-    )
-      throw new Error("Plugin icons must be at most 2048 × 2048 pixels");
-  } catch (cause) {
-    throw new Error(
-      cause instanceof Error
-        ? cause.message
-        : "The plugin icon could not be decoded",
-    );
-  } finally {
-    image?.free();
+  if (!validatedIcons.has(revision)) {
+    let image: InstanceType<typeof PhotonImage> | undefined;
+    try {
+      image = PhotonImage.new_from_byteslice(bytes);
+      if (
+        !image.get_width() ||
+        !image.get_height() ||
+        image.get_width() > PLUGIN_ICON_MAX_DIMENSION ||
+        image.get_height() > PLUGIN_ICON_MAX_DIMENSION
+      )
+        throw new Error("Plugin icons must be at most 2048 × 2048 pixels");
+    } catch (cause) {
+      throw new Error(
+        cause instanceof Error
+          ? cause.message
+          : "The plugin icon could not be decoded",
+      );
+    } finally {
+      image?.free();
+    }
+    validatedIcons.add(revision);
+    if (validatedIcons.size > VALIDATED_ICON_CACHE_LIMIT)
+      validatedIcons.delete(validatedIcons.values().next().value!);
   }
-  return {
-    bytes,
-    mediaType,
-    revision: createHash("sha256").update(bytes).digest("hex"),
-  };
+  return { bytes, mediaType, revision };
 }
 
 export async function readPluginIconAsset(
@@ -90,11 +96,19 @@ export function registerPluginIconRoutes(
         const image = images.find(Boolean);
         if (!image)
           return reply.code(404).send({ error: "Plugin icon not found" });
-        return reply
-          .header("Cache-Control", "no-store")
+        const etag = `"${image.revision}"`;
+        reply
+          .header("Cache-Control", "private, no-cache")
+          .header("ETag", etag)
           .header("X-Content-Type-Options", "nosniff")
-          .type(image.mediaType)
-          .send(image.bytes);
+          .type(image.mediaType);
+        if (
+          request.headers["if-none-match"]
+            ?.split(",")
+            .some((tag) => [etag, `W/${etag}`, "*"].includes(tag.trim()))
+        )
+          return reply.code(304).send();
+        return reply.send(image.bytes);
       } catch {
         return reply.code(404).send({ error: "Plugin icon not found" });
       }

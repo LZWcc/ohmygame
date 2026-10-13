@@ -7,6 +7,7 @@ import { PluginUninstallButton } from "../src/renderer/plugin-controls.js";
 import { readPluginBuilderInput, savePluginBuilderInput } from "../src/renderer/plugin-builder-drafts.js";
 import { PERSONAL_MARKETPLACE, type PluginDetail } from "../src/shared/plugins.js";
 import type { PluginSetupState } from "../src/shared/plugin-setup.js";
+import i18next from "i18next";
 
 const sessionId = "a1234567-1234-1234-1234-123456789abc";
 const plugin: PluginDetail = {
@@ -68,6 +69,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
+  await i18next.changeLanguage("en");
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -124,6 +126,24 @@ describe("Plugin Builder icons", () => {
   async function fill(element: HTMLInputElement, value: string) {
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(element, value); element.dispatchEvent(new Event("input", { bubbles: true })); });
   }
+  it("translates picker labels, preset searches and validation notices into Chinese", async () => {
+    await i18next.changeLanguage("zh-CN");
+    await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));
+    await act(async () => button("更改插件图标").click());
+    expect(document.querySelector('[role="dialog"] h2')?.textContent).toBe("插件图标");
+    await fill(input("搜索图标"), "终端");
+    expect(document.querySelectorAll(".plugin-icon-grid button")).toHaveLength(1);
+    expect(document.querySelector('[aria-label="终端 (terminal)"]')?.textContent).toBe("终端");
+    await fill(input("预设 ID"), "invented");
+    expect(modalButton("保存图标").disabled).toBe(true);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain("从列表选择预设图标，或输入它的 ID。");
+    await act(async () => modalButton("上传图片").click());
+    await act(async () => {
+      Object.defineProperty(input("插件图标图片"), "files", { value: [new File(["image"], "icon.gif")] });
+      input("插件图标图片").dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(document.querySelector('[role="alert"]')?.textContent).toBe("请选择不超过 1 MB 的 PNG 或 WebP 图片");
+  });
   it("searches presets, validates entered IDs and makes the changed draft updateable", async () => {
     await act(async () => root.render(<PluginBuilder sessionId={sessionId} />));
     await act(async () => button("Change plugin icon").click());
