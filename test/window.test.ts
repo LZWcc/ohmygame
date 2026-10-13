@@ -55,6 +55,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("desktop window", () => {
+  it("uses a native title bar to keep Playtest window controls outside the game on macOS", async () => {
+    vi.stubGlobal("process", { ...process, platform: "darwin" });
+    await createDesktopWindow({
+      runtime: { url: "http://127.0.0.1:43110", token: "token" },
+      preloadPath: "/tmp/preload.cjs",
+      rendererUrl: "http://127.0.0.1:43120",
+      contentSize: { width: 1280, height: 720 },
+      nativeTitleBar: true,
+    });
+    const window = electron.windows[0] as { options: Record<string, unknown> };
+    expect(window.options.useContentSize).toBe(true);
+    expect(window.options.titleBarStyle).toBeUndefined();
+  });
+
   it("starts at a moderate size centered in the display work area", async () => {
     await createDesktopWindow({
       runtime: { url: "http://127.0.0.1:43110", token: "token" },

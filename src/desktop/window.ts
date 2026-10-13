@@ -27,6 +27,8 @@ interface CreateWindowOptions {
   integratedMenuBar?: boolean;
   contentSize?: { width: number; height: number };
   aspectRatio?: number;
+  /** Keeps window controls and dragging outside the game surface. */
+  nativeTitleBar?: boolean;
   minWidth?: number;
   minHeight?: number;
   /** Never shown or heard, and keeps rendering while hidden so it can be captured. */
@@ -78,7 +80,7 @@ export async function createDesktopWindow(options: CreateWindowOptions): Promise
     `--ohmygame-daemon-url=${options.runtime.url}`,
     `--ohmygame-daemon-token=${options.runtime.token}`,
   ];
-  const platformWindowOptions = process.platform === "darwin"
+  const platformWindowOptions = process.platform === "darwin" && !options.nativeTitleBar
     ? {
         titleBarStyle: "hiddenInset" as const,
         ...(options.sidebarVibrancy ? {

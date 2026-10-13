@@ -5915,6 +5915,11 @@ button.home-nav-item-active:hover {
   background: var(--surface-hover);
   color: var(--text-secondary);
 }
+.plugin-icon-image {
+  object-fit: contain;
+  max-width: 100%;
+  max-height: 100%;
+}
 
 .plugin-row-copy {
   display: grid;
@@ -11726,12 +11731,14 @@ button {
   min-width: 0;
   height: 30px;
   align-items: center;
+  gap: 4px;
   border-radius: var(--radius);
   color: var(--text-muted);
 }
 
 .model-selector-canvas {
   height: 28px;
+  gap: 6px;
 }
 
 .model-selector-trigger {
@@ -11796,6 +11803,15 @@ button {
   opacity: 0.5;
 }
 
+.model-selector-trigger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.model-selector-reasoning-trigger {
+  flex: 0 0 auto;
+}
+
 .model-selector-popover {
   position: fixed;
   z-index: 200;
@@ -11807,8 +11823,12 @@ button {
   width: 220px;
 }
 
+.model-selector-popover-reasoning {
+  width: 150px;
+}
+
 .model-selector-menu,
-.model-selector-submenu {
+.model-selector-reasoning-menu {
   display: flex;
   box-sizing: border-box;
   width: 100%;
@@ -11818,10 +11838,9 @@ button {
   background: var(--menu-surface);
 }
 
-.model-selector-submenu {
-  position: relative;
+.model-selector-reasoning-menu {
   gap: 2px;
-  max-height: min(220px, calc(100dvh - 32px));
+  max-height: min(280px, calc(100dvh - 32px));
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -11897,7 +11916,8 @@ button {
   border-top: 0;
 }
 
-.model-selector-provider-name {
+.model-selector-provider-name,
+.model-selector-menu-heading {
   padding: 3px 7px 2px;
   overflow: hidden;
   color: var(--text-muted);
@@ -11909,12 +11929,12 @@ button {
 }
 
 .model-selector-model-list::-webkit-scrollbar,
-.model-selector-submenu::-webkit-scrollbar {
+.model-selector-reasoning-menu::-webkit-scrollbar {
   width: 8px;
 }
 
 .model-selector-model-list::-webkit-scrollbar-thumb,
-.model-selector-submenu::-webkit-scrollbar-thumb {
+.model-selector-reasoning-menu::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   border-radius: 999px;
   background: var(--scrollbar-thumb);
@@ -11936,7 +11956,7 @@ button {
 }
 
 .model-selector-menu button,
-.model-selector-submenu button {
+.model-selector-reasoning-menu button {
   display: flex;
   width: 100%;
   height: 30px;
@@ -11957,23 +11977,8 @@ button {
   text-align: left;
 }
 
-.model-selector-submenu .model-selector-back {
-  justify-content: flex-start;
-  gap: 7px;
-  margin-bottom: 2px;
-  border-bottom: 0;
-  border-radius: 0;
-  color: var(--text);
-}
-
-.model-selector-submenu button {
+.model-selector-reasoning-menu button {
   color: var(--text-muted);
-}
-
-.model-selector-menu .model-selector-reasoning {
-  margin-top: 2px;
-  border-top: 0;
-  border-radius: 0 0 4px 4px;
 }
 
 .model-selector-menu .model-selector-manage {
@@ -11988,31 +11993,22 @@ button {
 .model-selector-menu button:hover,
 .model-selector-menu button:focus-visible,
 .model-selector-menu button.active,
-.model-selector-submenu button:hover,
-.model-selector-submenu button:focus-visible,
-.model-selector-submenu button.active {
+.model-selector-reasoning-menu button:hover,
+.model-selector-reasoning-menu button:focus-visible,
+.model-selector-reasoning-menu button.active {
   outline: 0;
   background: var(--menu-hover);
   color: var(--text);
 }
 
 .model-selector-menu button > span:first-child,
-.model-selector-submenu button > span:first-child {
+.model-selector-reasoning-menu button > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.model-selector-setting-value {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 5px;
-  color: #b1b3bc;
-}
-
-.model-selector-setting-value svg,
-.model-selector-submenu button > svg {
+.model-selector-reasoning-menu button > svg {
   flex: 0 0 auto;
 }
 
@@ -14521,7 +14517,7 @@ button {
 :root[data-appearance="light"]
   :is(
     .prompt-box-home .model-selector-trigger,
-    .model-selector-setting-value,
+    .prompt-box-project .model-selector-trigger,
     .quiet-button,
     .viewport-trigger,
     .preview-location-refresh,
@@ -14564,7 +14560,7 @@ button {
   .selected-text-menu,
   .composer-command-menu,
   .model-selector-menu,
-  .model-selector-submenu,
+  .model-selector-reasoning-menu,
   .viewport-menu-popover,
   .preview-location-popover,
   .sign-in-dialog,
@@ -14583,7 +14579,7 @@ button {
   .project-switcher-popover,
   .conversation-popover,
   .model-selector-menu,
-  .model-selector-submenu,
+  .model-selector-reasoning-menu,
   .sign-in-dialog,
   .project-create-dialog,
   .project-settings-dialog,
@@ -15123,8 +15119,52 @@ button {
   color: var(--text-faint);
 }
 
-/* Over the Playtest game: Replay on hover, and a note when something breaks. Always dark. */
-.playable-playtest-corner button,
+/* Playtest actions stay in the editor, outside the game's input surface. */
+.playable-playtest-controls {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  app-region: no-drag;
+}
+.playable-playtest-controls > .playable-playtest-menu-trigger {
+  width: 18px;
+}
+.playable-playtest-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  min-width: 200px;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--menu-surface);
+  box-shadow: var(--menu-shadow);
+}
+.playable-playtest-menu > button {
+  display: flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.playable-playtest-menu > button:is(:hover, :focus-visible) {
+  background: var(--menu-hover);
+}
+
+/* Over the Playtest game: a note only when something breaks. Always dark. */
 .playable-playtest-problem {
   position: fixed;
   z-index: 10;
@@ -15135,38 +15175,6 @@ button {
   font-size: 11px;
   backdrop-filter: blur(12px);
   app-region: no-drag;
-}
-.playable-playtest-corner {
-  position: fixed;
-  z-index: 10;
-  top: 12px;
-  right: 12px;
-  display: flex;
-  gap: 6px;
-  opacity: 0;
-  transition: opacity 120ms ease;
-  app-region: no-drag;
-}
-/* Shown only while the pointer is near the top corner; the ::before widens that area. */
-.playable-playtest-corner:is(:hover, :focus-within) {
-  opacity: 1;
-}
-.playable-playtest-corner::before {
-  position: absolute;
-  inset: -24px -12px -24px -60px;
-  content: "";
-}
-.playable-playtest-corner button {
-  position: relative;
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  padding: 0;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.playable-playtest-problem {
   bottom: 16px;
   left: 50%;
   display: flex;

@@ -3,15 +3,11 @@ import { AddMcpPluginDialog, PluginConfigurationPanel, PluginMcpPanel, PluginUni
 import { PluginBuilderSessions } from "./plugin-builder.js";
 import { openPluginBuilder } from "./plugin-builder-navigation.js";
 import {
-  Box,
   ChevronRight,
   ExternalLink,
   FolderPlus,
   FolderOpen,
-  Gamepad2,
   GitBranch,
-  Globe2,
-  Image,
   LoaderCircle,
   Package,
   Plus,
@@ -19,7 +15,6 @@ import {
   Plug,
   Search,
   WandSparkles,
-  type IconComponent,
 } from "./icons.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -35,7 +30,7 @@ import type { ProjectState } from "../shared/contracts.js";
 import { inspectPluginSource, installPlugin, listPlugins, listProjects, readPlugin, readPluginSkill, uninstallPlugin, updatePluginSettings, waitForRuntime } from "./api.js";
 import { SidebarPageHeader } from "./sidebar-page.js";
 import { ProjectTypeIcon, projectTypeLabel } from "./project-types.js";
-import { GodotIcon } from "./godot-icon.js";
+import { PluginIcon, PluginGlyph } from "./plugin-icons.js";
 import { MarkdownContent } from "./markdown-content.js";
 import { t } from "./i18n.js";
 
@@ -606,24 +601,6 @@ function componentSettings(plugin: PluginDetail): PluginSettings {
 function pluginSummary(plugin: PluginDetail): PluginSummary {
   const { longDescription: _longDescription, skills: _skills, connections: _connections, defaultPrompts: _defaultPrompts, projectTypes: _projectTypes, mcpServers: _mcpServers, mcpConfigPath: _mcpConfigPath, configuration: _configuration, ...summary } = plugin;
   return summary;
-}
-
-const includedPluginIcons: Record<string, IconComponent> = {
-  "game-studio": Gamepad2,
-  "web-game-studio": Globe2,
-  "threejs-world": Box,
-  img2threejs: Image,
-};
-
-function PluginGlyph({ plugin, size }: { plugin: Pick<PluginSummary, "id" | "name" | "source">; size: number }): ReactNode {
-  if (plugin.id === "ohmygame:godot") return <GodotIcon size={size} />;
-  const included = plugin.source.type === "builtIn" || plugin.source.type === "preinstalled";
-  const Icon = (included ? includedPluginIcons[plugin.name] : undefined) ?? Package;
-  return <Icon size={size} aria-hidden="true" />;
-}
-
-function PluginIcon({ plugin, large = false }: { plugin: Pick<PluginSummary, "id" | "name" | "source">; large?: boolean }): ReactNode {
-  return <span className={`plugin-row-icon${plugin.id === "ohmygame:godot" ? " plugin-row-icon-godot" : ""}${large ? " plugin-row-icon-large" : ""}`}><PluginGlyph plugin={plugin} size={large ? 42 : 29} /></span>;
 }
 
 function pluginSearchText(plugin: PluginSummary): string {

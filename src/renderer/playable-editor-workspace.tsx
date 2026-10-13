@@ -5,7 +5,6 @@ import {
   House,
   LoaderCircle,
   PanelToggle,
-  Play,
   Share2,
   Settings,
 } from "./icons.js";
@@ -64,9 +63,9 @@ import {
 import { PublishDialog, type PublishDetails } from "./publish-dialog.js";
 import { WorkspaceCodeView } from "./coding-workspace.js";
 import { playtestHash } from "./routes.js";
-import { PlayableNodeWorkbench, type PlayableAssetRequest, type PlaytestStart } from "./playable-node-workbench.js";
+import { PlayableNodeWorkbench, type PlayableAssetRequest } from "./playable-node-workbench.js";
 import { PlayableProjectSettingsDialog } from "./playable-project-settings-dialog.js";
-import { requestPlaytestStart } from "./playable-playtest.js";
+import { PlaytestControls, requestPlaytest, type PlaytestRequest } from "./playable-playtest.js";
 import type { PlayableChatState } from "./playable-chat.js";
 import { buildCodebase, createFlowNode, nodeIdForIssuePath, nodeSourcePaths, toFlowEdge, toFlowNode, uniqueNodeId, type GraphMeta, type PlayableFlowData, type PlayableFlowNode } from "./playable-flow.js";
 import { PLAYABLE_NODE_TYPES, PlayableCanvasContext } from "./playable-node-card.js";
@@ -883,20 +882,34 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
     }
   }
 
-  /** Opens the Playtest window; `start` plays from a Scene instead of the saved game. */
-  async function startPlaytest(start?: PlaytestStart): Promise<void> {
+  /** Saves the project, sends any requested action, and opens or focuses Playtest. */
+  async function startPlaytest(request?: PlaytestRequest): Promise<void> {
     if (!codebase || building || playtesting) return;
     setPlaytesting(true);
-    if (!start) clearSelection();
+    if (request?.action !== "start") clearSelection();
+    const desktop = window.ohMyGameDesktop;
+    let playtest: Window | null = null;
+    let openedBlankWindow = false;
     try {
+      if (!desktop) {
+        // Open during the click's user activation, before waiting for a save.
+        playtest = window.open("", "ohmygame-playtest");
+        if (!playtest) throw new Error(t("playtest.popupBlocked"));
+        openedBlankWindow = playtest.location.href === "about:blank";
+      }
       await save(codebase);
-      if (start) requestPlaytestStart(projectId, start);
-      if (window.ohMyGameDesktop) {
-        await window.ohMyGameDesktop.openPlaytest(projectId, codebase.graph.viewport);
-      } else {
-        window.open(new URL(playtestHash(projectId), window.location.href).href, "ohmygame-playtest");
+      if (playtest?.closed) return;
+      if (request) requestPlaytest(projectId, request);
+      if (desktop) {
+        await desktop.openPlaytest(projectId, codebase.graph.viewport);
+      } else if (playtest) {
+        const url = new URL(playtestHash(projectId), window.location.href).href;
+        // Focusing an open Playtest must not reload it and lose a chosen start.
+        if (playtest.location.href !== url) playtest.location.href = url;
+        playtest.focus();
       }
     } catch (cause) {
+      if (openedBlankWindow) playtest?.close();
       setNotice(errorMessage(cause));
     } finally {
       setPlaytesting(false);
@@ -1019,9 +1032,7 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
           {!designOpen ? <><button className="icon-button pane-header-action" type="button" title={t("projectSettings.title")} aria-label={t("projectSettings.title")} aria-haspopup="dialog" disabled={phase !== "ready"} onClick={() => setProjectSettingsOpen(true)}>
             <Settings size={14} />
           </button>
-          <button className="icon-button pane-header-action" type="button" data-tooltip={playtesting ? t("storyEditor.openingPlaytest") : t("storyEditor.playtestWindow")} aria-label={t("storyEditor.playtest")} disabled={phase !== "ready" || building || playtesting} onClick={() => void startPlaytest()}>
-            {playtesting ? <LoaderCircle className="spin" size={14} /> : <Play size={14} />}
-          </button>
+          <PlaytestControls disabled={phase !== "ready" || building} busy={playtesting} onOpen={() => void startPlaytest()} onAction={(action) => void startPlaytest({ action })} />
           <button className="publish-button workspace-publish-button" type="button" title={publishing ? t("workspace.publishing") : t("workspace.publish")} aria-label={publishing ? t("workspace.publishing") : t("workspace.publish")} disabled={agentBusy || publishing || building} onClick={onOpenPublish}>
             {publishing ? <LoaderCircle className="spin" size={14} /> : <Share2 size={14} />}
             <span>{t("workspace.publish")}</span>
@@ -1133,7 +1144,10 @@ export function PlayableEditorWorkspace({ project, agentBusy, publishing, worksp
         onSetBackdrop={(asset) => writeBackdrop(openedNode.id, asset)}
         onRemoveBackdrop={() => removeBackdrop(openedNode.id)}
         {...(backdrop ? { backdrop } : {})}
-        onPlayFromHere={(start) => void startPlaytest(start)}
+        onPlayFromHere={(start) => void startPlaytest({ action: "start", start })}
+        onPlaytestAction={(action) => void startPlaytest({ action })}
+        playtestBusy={playtesting}
+        playtestDisabled={building}
         onChatContextChange={onChatContextChange}
       /> : null}
       {openedNode && notice ? <div className="story-save-notice is-over-workbench" role="alert">{notice}</div> : null}

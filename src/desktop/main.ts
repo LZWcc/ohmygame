@@ -359,6 +359,7 @@ handle("ohmygame:open-playtest", async (event, projectId: unknown, viewport: unk
     rendererUrl: useBuiltRenderer ? undefined : developmentRendererUrl,
     rendererFile: useBuiltRenderer ? path.join(moduleDirectory, "../renderer/index.html") : undefined,
     rendererHash: `#/playtest/${encodeURIComponent(projectId)}`,
+    nativeTitleBar: true,
     contentSize: size,
     aspectRatio,
     minWidth: Math.max(1, Math.round(size.width / 2)),

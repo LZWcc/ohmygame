@@ -60,6 +60,9 @@ export type MediaModelUsage = Exclude<ProviderCapability, "language">;
 export type MediaModelDefaults = Partial<Record<MediaModelUsage, ModelRef>>;
 
 export interface ProviderSummary extends ModelProviderSummary {
+  /** OpenAI can connect chat and images independently. */
+  languageConfigured?: boolean;
+  imageConfigured?: boolean;
   managed?: "free_cloud";
   cloud?: import("./cloud-models.js").CloudConnectionState;
   status: ProviderStatus;
@@ -172,6 +175,33 @@ export interface DiscoveredProviderModels {
 
 export interface ModelProviderEndpointSettings {
   baseUrl: string;
+}
+
+export type OpenAIImageConnectionMode = "connection" | "separate" | "disabled";
+export interface OpenAIImageModelConfiguration {
+  id: string;
+  name: string;
+  template: "gpt-image-1" | "gpt-image-2";
+  enabled: boolean;
+}
+export interface OpenAIImageConnectionSettings {
+  mode: OpenAIImageConnectionMode;
+  baseUrl: string;
+  configured: boolean;
+  connectionAvailable: boolean;
+  connectionBaseUrl?: string;
+  models: OpenAIImageModelConfiguration[];
+}
+export interface SaveOpenAIImageConnectionRequest {
+  mode: OpenAIImageConnectionMode;
+  baseUrl: string;
+  apiKey?: string;
+  models: OpenAIImageModelConfiguration[];
+}
+export type DiscoverOpenAIImageModelsRequest = Pick<SaveOpenAIImageConnectionRequest, "mode" | "baseUrl" | "apiKey">;
+export interface DiscoveredOpenAIImageModels {
+  models: OpenAIImageModelConfiguration[];
+  warnings?: string[];
 }
 
 export const RESPONSES_TRANSPORT_MODES = ["auto", "sse", "websocket"] as const;

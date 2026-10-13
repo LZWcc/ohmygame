@@ -21,6 +21,10 @@ import {
   type ModelAuthEvent,
   type ModelAuthMethod,
   type ModelProviderEndpointSettings,
+  type OpenAIImageConnectionSettings,
+  type SaveOpenAIImageConnectionRequest,
+  type DiscoverOpenAIImageModelsRequest,
+  type DiscoveredOpenAIImageModels,
   type ResponsesTransportSettings,
   type ResponsesTransportMode,
   type ProviderModelSettings,
@@ -253,6 +257,26 @@ export async function setProviderEnabled(providerId: string, enabled: boolean): 
   const result = await request<ProviderSummary>(`/settings/models/providers/${encodeURIComponent(providerId)}/enabled`, { method: "PATCH", body: JSON.stringify({ enabled }) });
   notifyAgentModelsChanged();
   return result;
+}
+
+export async function getOpenAIImageSettings(): Promise<OpenAIImageConnectionSettings> {
+  return request("/settings/models/providers/openai/images");
+}
+
+export async function saveOpenAIImageSettings(settings: SaveOpenAIImageConnectionRequest): Promise<OpenAIImageConnectionSettings> {
+  const saved = await request<OpenAIImageConnectionSettings>("/settings/models/providers/openai/images", { method: "PUT", body: JSON.stringify(settings) });
+  notifyAgentModelsChanged();
+  return saved;
+}
+
+export async function discoverOpenAIImageModels(settings: DiscoverOpenAIImageModelsRequest, signal?: AbortSignal): Promise<DiscoveredOpenAIImageModels> {
+  return request("/settings/models/providers/openai/images/discover", { method: "POST", body: JSON.stringify(settings), signal });
+}
+
+export async function removeOpenAIImageSettings(): Promise<OpenAIImageConnectionSettings> {
+  const saved = await request<OpenAIImageConnectionSettings>("/settings/models/providers/openai/images", { method: "DELETE" });
+  notifyAgentModelsChanged();
+  return saved;
 }
 
 export async function getCustomProvider(providerId: string): Promise<CustomProviderDetails> {
@@ -1147,6 +1171,16 @@ export async function listPluginSetups(): Promise<import("../shared/plugin-setup
 }
 export async function readPluginDraft(id: string): Promise<import("../shared/plugin-setup.js").PluginDraft> {
   return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/draft`);
+}
+export function updatePluginDraftIcon(id: string, input: import("../shared/plugin-setup.js").PluginIconUpdate): Promise<import("../shared/plugin-setup.js").PluginDraft> {
+  return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/icon`, { method: "PUT", body: JSON.stringify(input) });
+}
+export async function readPluginIconImage(pluginId: string, setupId?: string, signal?: AbortSignal, previewPath?: string): Promise<Blob> {
+  const route = setupId ? `/plugins/setup-sessions/${encodeURIComponent(setupId)}/icon` : `/plugins/${encodeURIComponent(pluginId)}/icon`;
+  const suffix = setupId && previewPath ? `?${new URLSearchParams({ path: previewPath })}` : "";
+  const response = await fetch(apiUrl(`${route}${suffix}`), { headers: runtimeHeaders(), signal });
+  if (!response.ok) throw await responseError(response);
+  return response.blob();
 }
 export async function readPluginDraftFile(id: string, path: string): Promise<{ path: string; content: string }> {
   return request(`/plugins/setup-sessions/${encodeURIComponent(id)}/file?${new URLSearchParams({ path })}`);

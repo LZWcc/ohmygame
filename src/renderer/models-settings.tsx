@@ -27,6 +27,7 @@ import {
 import { PROVIDER_ICONS } from "./provider-icons.js";
 import { CustomProviderDialog, PROVIDER_API_LABELS, type CustomProviderField } from "./custom-provider-dialog.js";
 import { ProviderModels } from "./provider-models.js";
+import { OpenAIImageModels } from "./openai-image-models.js";
 import { ProviderResponsesTransport } from "./responses-transport-settings.js";
 import { Provider3DBalance } from "./provider-3d-balance.js";
 import { MODEL3D_CONNECTION_ID } from "../shared/model3d-operations.js";
@@ -233,7 +234,7 @@ function ProviderAuthView({ provider, onBack, onCompleted }: { provider: Provide
   if (provider.id === "meshy" || provider.id === "tripo") return <Native3DProviderAuthView provider={provider} onBack={onBack} onCompleted={onCompleted} />;
   if (SEEDANCE_PROVIDER_IDS.has(provider.id)) return <SeedanceAuthView provider={provider} onBack={onBack} onCompleted={onCompleted} />;
   const [method, setMethod] = useState<ModelAuthMethod | undefined>(provider.configured ? undefined : provider.methods.length === 1 ? provider.methods[0]?.type : undefined);
-  if (provider.configured) return <ConnectedProvider provider={provider} onBack={onBack} onRemoved={onCompleted} />;
+  if (provider.configured || provider.id === "openai") return <ConnectedProvider provider={provider} onBack={onBack} onRemoved={onCompleted} />;
   if (!method) return <AuthMethodChoice provider={provider} onBack={onBack} onChoose={setMethod} />;
   return <ActiveProviderAuth provider={provider} method={method} onBack={onBack} onCompleted={onCompleted} />;
 }
@@ -660,6 +661,9 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
   const [notice, setNotice] = useState<string>();
   const [editing, setEditing] = useState<ModelAuthMethod | "endpoint">();
   const [credentialType, setCredentialType] = useState(provider.credentialType ?? "api_key");
+  const [chatConnected, setChatConnected] = useState(provider.languageConfigured ?? provider.configured);
+  const [imageConnected, setImageConnected] = useState(provider.imageConfigured ?? false);
+  const displayedProvider = provider.id === "openai" ? { ...provider, configured: chatConnected || imageConnected, languageConfigured: chatConnected, imageConfigured: imageConnected, credentialType: chatConnected ? credentialType : undefined } : provider;
   const [modelsRevision, setModelsRevision] = useState(0);
   const endpoint = useProviderEndpoint(provider.id);
   function edit(setting: ModelAuthMethod | "endpoint"): void {
@@ -668,6 +672,7 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
     setEditing(setting);
   }
   function completeAuth(method: ModelAuthMethod): void {
+    setChatConnected(true);
     setCredentialType(method);
     setEditing(undefined);
     setModelsRevision((value) => value + 1);
@@ -682,23 +687,25 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
       notifyAgentModelsChanged();
       setEditing(undefined);
       setNotice(t("providers.notice.baseUrl"));
+      setModelsRevision((value) => value + 1);
     } catch (cause) {
       setError(errorMessage(cause));
     }
   }
   const displayedError = deletion.error ?? error ?? endpoint.error;
   // Only API keys can go through a proxy; a ChatGPT sign-in always talks to OpenAI directly.
-  const showsEndpoint = endpoint.supported && credentialType !== "oauth";
-  const canEditKey = credentialType !== "oauth" && provider.methods.some((method) => method.type === "api_key");
-  const alternateMethod = provider.methods.length > 1 ? provider.methods.find((method) => method.type !== credentialType)?.type : undefined;
+  const showsEndpoint = chatConnected && endpoint.supported && credentialType !== "oauth";
+  const canEditKey = chatConnected && credentialType !== "oauth" && provider.methods.some((method) => method.type === "api_key");
+  const alternateMethod = chatConnected && provider.methods.length > 1 ? provider.methods.find((method) => method.type !== credentialType)?.type : undefined;
   return (
     <section className="settings-panel settings-provider-detail">
-      <ProviderDetailHeader provider={provider} onBack={onBack}>
-        <ProviderDeleteButton deletion={deletion} disabled={Boolean(editing) || endpoint.saving} />
-        <ProviderEnableControl provider={provider} disabled={deletion.busy} onChanged={() => setModelsRevision((value) => value + 1)} />
+      <ProviderDetailHeader provider={displayedProvider} onBack={onBack}>
+        {displayedProvider.configured ? <ProviderDeleteButton deletion={deletion} disabled={Boolean(editing) || endpoint.saving} /> : null}
+        {displayedProvider.configured ? <ProviderEnableControl provider={displayedProvider} disabled={deletion.busy} onChanged={() => setModelsRevision((value) => value + 1)} /> : null}
       </ProviderDetailHeader>
-      <ProviderDeleteConfirmation provider={{ ...provider, credentialType }} deletion={deletion} disabled={Boolean(editing) || endpoint.saving} />
-      {alternateMethod || canEditKey || showsEndpoint ? <div className="settings-provider-connection">
+      <ProviderDeleteConfirmation provider={{ ...displayedProvider, credentialType: chatConnected ? credentialType : undefined }} deletion={deletion} disabled={Boolean(editing) || endpoint.saving} />
+      {!chatConnected ? <div className="settings-detail-section"><h4>{t("openAIImages.chatTitle")}</h4><p className="settings-detail-hint">{t("openAIImages.chatHint")}</p><div className="settings-form-actions">{provider.methods.map((method) => <button type="button" className="settings-secondary-button" key={method.type} disabled={Boolean(editing) || deletion.busy} onClick={() => edit(method.type)}>{authMethodLabel(method)}</button>)}</div></div> : null}
+      {editing || alternateMethod || canEditKey || showsEndpoint ? <div className="settings-provider-connection">
         {alternateMethod ? <div className="settings-provider-setting-row settings-provider-auth-row">
           <span className="settings-search-field-label">{t("providers.signIn")}</span>
           <span className="settings-provider-setting-value">{credentialType === "oauth" ? t("providers.browserSignIn") : t("providers.apiKey")}</span>
@@ -711,7 +718,7 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
             <button className="icon-button settings-provider-setting-edit" type="button" aria-label={t("providers.editApiKey")} data-tooltip={t("providers.editApiKey")} aria-expanded={editing === "api_key"} disabled={Boolean(editing) || deletion.busy} onClick={() => edit("api_key")}><Pencil size={15} aria-hidden="true" /></button>
           </div>
         </section> : null}
-        {editing === "api_key" || editing === "oauth" ? <div className="settings-provider-setting-editor"><ActiveProviderAuth provider={provider} method={editing} inline onBack={() => setEditing(undefined)} onCompleted={() => completeAuth(editing)} onFailed={(message) => { setEditing(undefined); setError(message); }} /></div> : null}
+        {editing === "api_key" || editing === "oauth" ? <div className="settings-provider-setting-editor"><ActiveProviderAuth provider={{ ...provider, configured: chatConnected }} method={editing} inline onBack={() => setEditing(undefined)} onCompleted={() => completeAuth(editing)} onFailed={(message) => { setEditing(undefined); setError(message); }} /></div> : null}
         {showsEndpoint ? <section aria-label={t("providers.baseUrlSettings")}>
           <div className="settings-provider-setting-row">
             <span className="settings-search-field-label">{t("providers.baseUrl")}</span>
@@ -729,9 +736,9 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
       </div> : null}
       {displayedError ? <p className="settings-error" role="alert">{displayedError}</p> : null}
       {notice ? <p className="settings-success" role="status">{notice}</p> : null}
-      {provider.id === "openai" ? <ProviderResponsesTransport providerId={provider.id} disabled={deletion.busy || Boolean(editing)} /> : null}
-      <ProviderModels key={modelsRevision} providerId={provider.id} />
-      {provider.capabilities.includes("image") ? <ProviderImageModels key={`images-${modelsRevision}`} providerId={provider.id} /> : null}
+      {provider.id === "openai" && chatConnected ? <ProviderResponsesTransport providerId={provider.id} disabled={deletion.busy || Boolean(editing)} /> : null}
+      {chatConnected ? <ProviderModels key={modelsRevision} providerId={provider.id} /> : null}
+      {provider.id === "openai" ? <OpenAIImageModels revision={modelsRevision} disabled={deletion.busy || Boolean(editing)} onChanged={setImageConnected} /> : provider.capabilities.includes("image") ? <ProviderImageModels key={`images-${modelsRevision}`} providerId={provider.id} /> : null}
     </section>
   );
 }
@@ -741,7 +748,7 @@ export function ActiveProviderAuth({ provider, method, inline = false, onBack, o
   const { prompt, notification, external } = auth;
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string>();
-  const endpoint = useProviderEndpoint(inline ? "" : provider.id);
+  const endpoint = useProviderEndpoint(inline && provider.configured ? "" : provider.id);
   const editingKey = inline && provider.configured && method === "api_key";
   const apiKeyMethod = provider.methods.find((candidate) => candidate.type === "api_key");
   // Translate the SDK's standard key prompt, keeping multi-step/custom auth instructions intact.

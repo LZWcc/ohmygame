@@ -4,6 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
+import type { AgentModel } from "../src/shared/contracts.js";
 
 // The saved preference is read once, when the i18n module loads.
 localStorage.setItem("ohmygame:language", "zh-CN");
@@ -35,6 +36,7 @@ const { CanvasTableStorage } =
   await import("../src/renderer/canvas-table-storage.js");
 const { createCanvasTable } = await import("../src/shared/canvas-table.js");
 const { Onboarding } = await import("../src/renderer/onboarding.js");
+const { ModelSelector } = await import("../src/renderer/model-selector.js");
 
 let root: ReturnType<typeof createRoot> | undefined;
 afterEach(async () => {
@@ -126,4 +128,13 @@ it("translates both onboarding steps and preserves provider names", async () => 
   expect(
     host.querySelector('[aria-label="自定义服务商"]')?.textContent,
   ).toContain("显示名称");
+});
+
+it("localizes the separate reasoning button while keeping the xhigh label", () => {
+  const model: AgentModel = { provider: "openai", providerName: "OpenAI", id: "test", name: "Test", reasoningLevels: ["high", "xhigh"] };
+  const html = renderToStaticMarkup(<ModelSelector variant="canvas" models={[model]} value={model} reasoningLevel="xhigh" onChange={() => {}} onReasoningChange={() => {}} />);
+  expect(html).toContain('aria-label="文本模型：Test"');
+  expect(html).toContain('aria-label="推理：xhigh"');
+  expect(html).toContain('title="推理：xhigh"');
+  expect(html).toContain("xhigh</span>");
 });
