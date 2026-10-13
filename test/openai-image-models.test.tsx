@@ -82,6 +82,15 @@ async function fill(label: string, value: string) {
 async function click(text: string) {
   await act(async () => button(text).click());
 }
+async function clickLabel(label: string) {
+  await act(async () =>
+    (
+      container.querySelector(
+        `button[aria-label="${label}"]`,
+      ) as HTMLButtonElement
+    ).click(),
+  );
+}
 async function save() {
   await act(async () =>
     container
@@ -92,8 +101,11 @@ async function save() {
 
 it("configures an independent relay for browser sign-in, previews models, then saves enabled choices", async () => {
   await render();
-  expect(button("Save image settings").disabled).toBe(true);
-  expect(button("Cancel changes").disabled).toBe(true);
+  expect(container.querySelector("input,select")).toBeNull();
+  expect(button("Save")).toBeUndefined();
+  await click("Connect");
+  expect(button("Save").disabled).toBe(true);
+  expect(button("Cancel").disabled).toBe(false);
   expect(
     container
       .querySelector('option[value="connection"]')
@@ -123,14 +135,15 @@ it("configures an independent relay for browser sign-in, previews models, then s
     }),
   );
   expect(changed).toHaveBeenCalledWith(true);
-  expect(
-    (container.querySelector('input[type="password"]') as HTMLInputElement)
-      .value,
-  ).toBe("");
+  expect(container.querySelector('input[type="password"]')).toBeNull();
+  expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+  expect(button("Save")).toBeUndefined();
+  expect(container.textContent).toContain("GPT Image 2");
 });
 
 it("adds a model alias without discovery and saves its selected capability template", async () => {
   await render();
+  await click("Connect");
   await fill("Image API key", "relay-key");
   await click("Add model");
   await fill("Model ID", "my-relay-alias");
@@ -169,8 +182,10 @@ it("cancels stale discovery when the endpoint changes and restores saved choices
       }),
   );
   await render();
+  await click("Edit");
   await click("Fetch models");
   const signal = api.discover.mock.calls[0]![1] as AbortSignal;
+  await clickLabel("Edit image Base URL");
   await fill("Image Base URL", "https://other.test/v1");
   expect(signal.aborted).toBe(true);
   await act(async () =>
@@ -186,8 +201,10 @@ it("cancels stale discovery when the endpoint changes and restores saved choices
     (container.querySelector('input[type="password"]') as HTMLInputElement)
       .required,
   ).toBe(true);
-  await click("Cancel changes");
+  await click("Cancel");
   expect(container.textContent).toContain("Saved");
+  expect(container.querySelector('input[type="password"]')).toBeNull();
+  await click("Edit");
   expect(button("Fetch models").disabled).toBe(false);
 });
 
@@ -207,6 +224,10 @@ it("merges refreshed models without changing saved aliases, templates or enable 
     ],
   });
   await render();
+  expect(container.textContent).toContain("My image");
+  expect(container.textContent).not.toContain("Manual");
+  expect(container.querySelector("select")).toBeNull();
+  await click("Edit");
   await click("Fetch models");
   expect(container.textContent).toContain("My image");
   expect(container.textContent).toContain("Manual");
@@ -217,6 +238,7 @@ it("merges refreshed models without changing saved aliases, templates or enable 
       ) as HTMLInputElement
     ).checked,
   ).toBe(true);
+  await clickLabel("Edit My image");
   expect(
     (
       container.querySelector(

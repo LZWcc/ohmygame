@@ -30,14 +30,17 @@ The built-in **OpenAI** page has an independent **Image models** section. Chat c
 use **Browser sign-in** while images use a separate API key. An image-only OpenAI
 connection also works when chat uses another provider.
 
-Choose **Separate API key and Base URL**, enter the key for that endpoint, and use
+Choose **Connect** (or the pencil beside a saved connection setting), then
+**Separate API key and Base URL**. Enter the key for that endpoint and use
 the default `https://api.openai.com/v1` or your compatible GPT Image relay's API
 base, including `/v1` when required. **Fetch models** requests `{base}/models` with
 the image key and previews recognized image models. Enable the models you want,
-then choose **Save image settings**. Fetching checks the catalog, not generation
+then choose **Save**. The section normally shows compact connection details and
+enabled models; **Edit** reveals model management, and a model's pencil reveals
+its capability template. Fetching checks the catalog, not generation
 access, and does not save the draft or generate a paid image. A failed fetch keeps
 the saved connection available. Changing the draft connection clears its model
-list and cancels an outstanding fetch; **Cancel changes** restores saved settings.
+list and cancels an outstanding fetch; **Cancel** restores saved settings.
 
 If the service omits a model from its list, use **Add model** with its exact ID or
 alias. Choose **GPT Image 1 / 1.5** for fixed sizes or **GPT Image 2 / 2.5** for
@@ -64,9 +67,9 @@ to keep its saved value for the same Base URL. A changed endpoint requires its
 key to be entered again. A rejected image key reports an error without falling
 back to the chat key or another provider.
 
-**Remove image connection** clears the image key and models and selects
-**Disabled**, leaving chat connected. To share chat's key afterwards, select that
-mode explicitly. **Delete provider** clears both OpenAI connections and their
+The **Remove image connection** icon in edit mode clears the image key and models
+and selects **Disabled**, leaving chat connected. To share chat's key afterwards,
+select that mode explicitly. **Delete provider** clears both OpenAI connections and their
 settings. Existing project/node choices remain saved and require an available
 image connection to generate again.
 
