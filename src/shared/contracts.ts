@@ -306,6 +306,7 @@ export interface PublicationState {
 export type ProjectCoverMode = "auto" | "custom";
 
 export interface ProjectCoverState {
+  /** "custom" also freezes an automatic cover, or disables capture before a cover exists. */
   mode: ProjectCoverMode;
 }
 

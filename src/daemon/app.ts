@@ -1652,6 +1652,7 @@ export function createApp(options: AppOptions = {}) {
     const cover = await projects.cover(projectId);
     const project = projects.get(projectId);
     if (cover || project?.type !== "interactive-story") return cover;
+    if ((await projects.coverState(projectId)).mode === "custom") return undefined;
     return readPlayableCover(project.workspacePath);
   };
 
@@ -1671,6 +1672,17 @@ export function createApp(options: AppOptions = {}) {
     return projects.coverState(request.params.projectId);
   });
 
+  app.put<{ Params: { projectId: string }; Body: { mode?: string } }>("/projects/:projectId/cover/state", async (request, reply) => {
+    const project = projects.get(request.params.projectId);
+    if (!project) return reply.code(404).send({ error: "Project not found" });
+    const mode = request.body?.mode;
+    if (mode !== "auto" && mode !== "custom") return reply.code(400).send({ error: "Invalid cover mode" });
+    const fallback = mode === "custom" && project.type === "interactive-story"
+      ? await readPlayableCover(project.workspacePath) : undefined;
+    await projects.setCoverMode(project.id, mode, fallback);
+    return reply.code(204).send();
+  });
+
   app.put<{ Params: { projectId: string }; Querystring: { source?: string }; Body: Buffer }>("/projects/:projectId/cover", async (request, reply) => {
     if (!projects.get(request.params.projectId)) return reply.code(404).send({ error: "Project not found" });
     const source = request.query.source ?? "custom";
@@ -1682,7 +1694,7 @@ export function createApp(options: AppOptions = {}) {
 
   app.delete<{ Params: { projectId: string } }>("/projects/:projectId/cover", async (request, reply) => {
     if (!projects.get(request.params.projectId)) return reply.code(404).send({ error: "Project not found" });
-    await projects.restoreAutomaticCover(request.params.projectId);
+    await projects.setCoverMode(request.params.projectId, "auto");
     return reply.code(204).send();
   });
 

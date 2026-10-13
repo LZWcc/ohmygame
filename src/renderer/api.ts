@@ -580,8 +580,8 @@ export async function setProjectCover(projectId: string, cover: Blob, source: Pr
   if (!response.ok) throw await responseError(response);
 }
 
-export async function restoreAutomaticProjectCover(projectId: string): Promise<void> {
-  await request(`/projects/${projectId}/cover`, { method: "DELETE" });
+export async function setProjectCoverMode(projectId: string, mode: ProjectCoverMode): Promise<void> {
+  await request(`/projects/${projectId}/cover/state`, { method: "PUT", body: JSON.stringify({ mode }) });
 }
 
 export async function listWorkspaceFiles(projectId: string): Promise<WorkspaceFile[]> {

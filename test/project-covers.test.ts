@@ -16,6 +16,37 @@ async function fixture() {
 }
 
 describe("project cover selection", () => {
+  it("freezes the current automatic cover without an upload and blocks late captures", async () => {
+    const { manager, project } = await fixture();
+    await Promise.all([
+      manager.setCover(project.id, Buffer.from("automatic"), "auto"),
+      manager.setCoverMode(project.id, "custom"),
+      manager.setCover(project.id, Buffer.from("late capture"), "auto"),
+    ]);
+    expect(await manager.coverState(project.id)).toEqual({ mode: "custom" });
+    expect(await manager.cover(project.id)).toEqual(Buffer.from("automatic"));
+    await manager.setCoverMode(project.id, "auto");
+    expect(await manager.cover(project.id)).toEqual(Buffer.from("automatic"));
+    await manager.setCover(project.id, Buffer.from("next capture"), "auto");
+    expect(await manager.cover(project.id)).toEqual(Buffer.from("next capture"));
+  });
+
+  it("persists and duplicates automatic-off mode even before a cover exists", async () => {
+    const { directory, manager, project } = await fixture();
+    await manager.setCoverMode(project.id, "custom");
+    const restored = new ProjectManager(directory);
+    await restored.load();
+    expect(await restored.coverState(project.id)).toEqual({ mode: "custom" });
+    const duplicate = await restored.duplicate(project.id);
+    await restored.setCover(duplicate.id, Buffer.from("capture"), "auto");
+    expect(await restored.coverState(duplicate.id)).toEqual({ mode: "custom" });
+    expect(await restored.cover(duplicate.id)).toBeUndefined();
+    await restored.setCoverMode(duplicate.id, "auto");
+    await restored.setCover(duplicate.id, Buffer.from("capture"), "auto");
+    expect(await restored.cover(duplicate.id)).toEqual(Buffer.from("capture"));
+    expect(await restored.coverState(project.id)).toEqual({ mode: "custom" });
+  });
+
   it("keeps a custom cover when automatic captures finish on either side of its save", async () => {
     const { manager, project } = await fixture();
     const automatic = Buffer.from("automatic");
@@ -29,7 +60,7 @@ describe("project cover selection", () => {
     expect(await manager.cover(project.id)).toEqual(custom);
     expect(await manager.coverState(project.id)).toEqual({ mode: "custom" });
 
-    await manager.restoreAutomaticCover(project.id);
+    await manager.setCoverMode(project.id, "auto");
     expect(await manager.cover(project.id)).toEqual(automatic);
     await manager.setCover(project.id, Buffer.from("next capture"), "auto");
     expect(await manager.cover(project.id)).toEqual(Buffer.from("next capture"));
@@ -46,7 +77,7 @@ describe("project cover selection", () => {
     const duplicate = await restored.duplicate(project.id);
     expect(await restored.coverState(duplicate.id)).toEqual({ mode: "custom" });
     expect(await restored.cover(duplicate.id)).toEqual(Buffer.from("custom"));
-    await restored.restoreAutomaticCover(duplicate.id);
+    await restored.setCoverMode(duplicate.id, "auto");
     expect(await restored.cover(duplicate.id)).toEqual(Buffer.from("automatic"));
     expect(await restored.cover(project.id)).toEqual(Buffer.from("custom"));
     const restarted = new ProjectManager(directory);
@@ -61,7 +92,7 @@ describe("project cover selection", () => {
     expect(await manager.coverState(project.id)).toEqual({ mode: "custom" });
     await manager.setCover(project.id, Buffer.from("capture"), "auto");
     expect(await manager.cover(project.id)).toEqual(Buffer.from("legacy cover"));
-    await manager.restoreAutomaticCover(project.id);
+    await manager.setCoverMode(project.id, "auto");
     expect(await manager.cover(project.id)).toBeUndefined();
     await manager.setCover(project.id, Buffer.from("capture"), "auto");
     expect(await manager.cover(project.id)).toEqual(Buffer.from("capture"));

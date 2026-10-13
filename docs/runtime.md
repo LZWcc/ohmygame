@@ -275,8 +275,9 @@ Each project lives under the daemon data directory:
 ```text
 projects/<project-id>/
 ├── project.json   project identity and latest publication
-├── cover.webp     custom cover; its presence stops automatic replacement
+├── cover.webp     custom or frozen cover; its presence stops automatic replacement
 ├── cover-auto.webp last automatic cover, retained when a custom cover is applied
+├── cover-state.json explicit automatic-off preference, including when no cover exists
 ├── preview-origin.json stable local preview port
 ├── workspace/     the project files (or an existing folder in the desktop app)
 └── session/       Pi session files, one per conversation
@@ -286,12 +287,17 @@ Removing a project never deletes an existing folder used as its workspace.
 
 Project covers are saved independently of publishing. Selecting an image in the
 publish dialog previews it; **Apply cover** saves it and stops automatic cover
-replacement. **Restore automatic cover** returns to the last automatic cover,
-or an Interactive Story's Scene thumbnail when available. Automatic captures
+replacement. The **Automatic** switch beside **Cover** can also stop replacement
+without uploading an image: it freezes the current cover, including an
+Interactive Story's Scene thumbnail, or keeps the cover empty if none exists.
+Turning it back on returns to the last automatic cover, or an Interactive
+Story's Scene thumbnail when available. Automatic captures
 cannot overwrite a custom cover, including captures already in flight. Existing
 covers from older app versions are protected as custom covers until the user
-restores automatic mode. Restoring removes the custom cover; the automatic
-cover is retained separately. Duplicating a project preserves both covers.
+enables **Automatic**. Enabling it removes the custom or frozen cover and the
+explicit automatic-off preference; the automatic cover is retained separately.
+The preference survives restarts. Duplicating a project preserves both covers
+and the automatic-off preference.
 The Community cover is a snapshot in the published Deployment and changes only
 when an update is published; publication details show that snapshot.
 
