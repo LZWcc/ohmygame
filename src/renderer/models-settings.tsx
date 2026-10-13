@@ -3,10 +3,8 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import type {
   CustomProviderDetails,
   CustomProviderModel,
-  ModelAuthEvent,
   ModelAuthMethod,
   ModelAuthNotification,
-  ModelAuthPrompt,
   ImageModel,
   ModelProviderSummary,
   ProviderCapability,
@@ -17,14 +15,10 @@ import {
   getCustomProvider,
   removeProvider,
   setProviderEnabled,
-  cancelModelAuth,
   getOpenAIEndpointSettings,
   listProviders,
   listImageModelCatalog,
   notifyAgentModelsChanged,
-  respondToModelAuth,
-  startModelProviderLogin,
-  subscribeToModelAuth,
   updateOpenAIEndpointSettings,
   updateModel3DProviderApiKey,
   updateSeedanceApiKey,
@@ -36,6 +30,7 @@ import { ProviderModels } from "./provider-models.js";
 import { Provider3DBalance } from "./provider-3d-balance.js";
 import { MODEL3D_CONNECTION_ID } from "../shared/model3d-operations.js";
 import { GlobalMediaModelDefaults } from "./media-model-defaults.js";
+import { openModelAuthExternal as openExternal, useModelProviderAuth } from "./use-model-provider-auth.js";
 import { SegmentedControl } from "./segmented-control.js";
 import { useAuth } from "./auth.js";
 import { accountCloudState, cloudQuotaSummary, CloudQuotaDetails } from "./cloud-quota.js";
@@ -726,103 +721,35 @@ function ConnectedProvider({ provider, onBack, onRemoved }: { provider: Provider
   );
 }
 
-function ActiveProviderAuth({ provider, method, inline = false, onBack, onCompleted, onFailed }: { provider: ModelProviderSummary; method: ModelAuthMethod; inline?: boolean; onBack: () => void; onCompleted: () => void; onFailed?: (error: string) => void }) {
-  const [operationId, setOperationId] = useState<string>();
-  const [prompt, setPrompt] = useState<{ id: string; value: ModelAuthPrompt }>();
-  const [notification, setNotification] = useState<ModelAuthNotification>();
+export function ActiveProviderAuth({ provider, method, inline = false, onBack, onCompleted, onFailed }: { provider: ModelProviderSummary; method: ModelAuthMethod; inline?: boolean; onBack: () => void; onCompleted: () => void; onFailed?: (error: string) => void }) {
+  const auth = useModelProviderAuth({ providerId: provider.id, method, onCompleted, onCancelled: onBack, onFailed });
+  const { prompt, notification, external } = auth;
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string>();
-  const operationRef = useRef<string | undefined>(undefined);
-  const openedUrl = useRef<string | undefined>(undefined);
   const endpoint = useProviderEndpoint(inline ? "" : provider.id);
-  const editingKey = inline && method === "api_key";
+  const editingKey = inline && provider.configured && method === "api_key";
   // A proxy Base URL only applies to API keys; never send a ChatGPT sign-in through it.
   const editsEndpoint = endpoint.supported && method === "api_key";
+  const cancel = auth.cancel;
 
-  useEffect(() => {
-    let active = true;
-    void startModelProviderLogin(provider.id, method).then((id) => {
-      if (!active) {
-        void cancelModelAuth(id).catch(() => undefined);
-        return;
-      }
-      operationRef.current = id;
-      setOperationId(id);
-    }).catch((cause) => {
-      if (active) fail(errorMessage(cause));
-    });
-    return () => {
-      active = false;
-      if (operationRef.current) void cancelModelAuth(operationRef.current).catch(() => undefined);
-    };
-  }, [method, provider.id]);
-
-  useEffect(() => {
-    if (!operationId) return;
-    return subscribeToModelAuth(operationId, {
-      onEvent: (event) => handleAuthEvent(event),
-      onError: () => setError("Connection to the authentication flow was interrupted."),
-    });
-  }, [operationId]);
-
-  function fail(message: string): void {
-    if (onFailed) onFailed(message);
-    else setError(message);
-  }
-
-  function handleAuthEvent(event: ModelAuthEvent): void {
-    if (event.type === "notification") {
-      setNotification(event.notification);
-      return;
-    }
-    if (event.type === "prompt") {
-      setPrompt({ id: event.promptId, value: event.prompt });
-      setAnswer("");
-      return;
-    }
-    if (event.type === "completed") {
-      operationRef.current = undefined;
-      notifyAgentModelsChanged();
-      onCompleted();
-    } else if (event.type === "cancelled") {
-      operationRef.current = undefined;
-      onBack();
-    } else if (event.type === "error") {
-      operationRef.current = undefined;
-      fail(event.error);
-    }
-  }
+  useEffect(() => { setAnswer(""); }, [prompt?.id]);
 
   async function respond(event: FormEvent): Promise<void> {
     event.preventDefault();
-    if (!operationId || !prompt) return;
+    if (!prompt || auth.responding) return;
     const value = prompt.value.type === "select" ? answer || prompt.value.options[0]?.id || "" : answer;
+    setError(undefined);
     try {
       if (editsEndpoint) await endpoint.save();
-      await respondToModelAuth(operationId, prompt.id, value);
-      setPrompt(undefined);
-      setAnswer("");
+      await auth.respond(value);
     } catch (cause) {
       setError(errorMessage(cause));
     }
   }
 
-  async function cancel(): Promise<void> {
-    if (operationId) await cancelModelAuth(operationId).catch(() => undefined);
-    operationRef.current = undefined;
-    onBack();
-  }
-
-  const external = authExternalTarget(notification);
-  const displayedError = error ?? endpoint.error;
+  const displayedError = error ?? auth.error ?? endpoint.error;
   // Browser sign-in also offers pasting the redirect URL, in case the callback never reaches the app.
   const browserFallback = prompt?.value.type === "manual_code" && Boolean(external);
-
-  useEffect(() => {
-    if (method !== "oauth" || !external || openedUrl.current === external) return;
-    openedUrl.current = external;
-    void openExternal(external).catch(() => undefined);
-  }, [external, method]);
   return (
     <section className={inline ? undefined : "settings-panel settings-provider-detail"}>
       {!inline ? <ProviderDetailHeader provider={provider} onBack={() => void cancel()} /> : null}
@@ -841,7 +768,7 @@ function ActiveProviderAuth({ provider, method, inline = false, onBack, onComple
           </label>
           <div className="settings-form-actions">
             <button className="settings-secondary-button" type="button" onClick={() => void cancel()}>Cancel</button>
-            <button className="settings-primary-button" type="submit" disabled={endpoint.loading || endpoint.saving || (editsEndpoint && !endpoint.baseUrl.trim()) || (prompt.value.type !== "select" && !prompt.value.optional && !answer.trim())}>{editingKey && prompt.value.type === "secret" ? "Save key" : "Continue"}</button>
+            <button className="settings-primary-button" type="submit" disabled={auth.responding || endpoint.loading || endpoint.saving || (editsEndpoint && !endpoint.baseUrl.trim()) || (prompt.value.type !== "select" && !prompt.value.optional && !answer.trim())}>{editingKey && prompt.value.type === "secret" ? "Save key" : "Continue"}</button>
           </div>
         </form>
       ) : (
@@ -863,7 +790,7 @@ function ActiveProviderAuth({ provider, method, inline = false, onBack, onComple
               <label className="settings-detail-hint" htmlFor="model-auth-redirect">Browser didn't return here? Paste the address it ended on.</label>
               <div className="settings-detail-inline">
                 <input id="model-auth-redirect" className="settings-search-input" value={answer} placeholder={prompt.value.type === "manual_code" ? prompt.value.placeholder : undefined} onChange={(event) => setAnswer(event.target.value)} spellCheck={false} />
-                <button className="settings-secondary-button" type="submit" disabled={!answer.trim()}>Continue</button>
+                <button className="settings-secondary-button" type="submit" disabled={auth.responding || !answer.trim()}>Continue</button>
               </div>
             </form>
           ) : null}
@@ -999,22 +926,6 @@ function notificationText(notification: ModelAuthNotification | undefined): stri
   if (notification.type === "auth_url") return notification.instructions ?? "Complete authentication in your browser.";
   return notification.message;
 }
-
-function authExternalTarget(notification: ModelAuthNotification | undefined): string | undefined {
-  if (notification?.type === "auth_url") return notification.url;
-  if (notification?.type === "device_code") return notification.verificationUri;
-  if (notification?.type === "info") return notification.links?.[0]?.url;
-  return undefined;
-}
-
-async function openExternal(url: string): Promise<void> {
-  if (window.ohMyGameDesktop?.openExternal) {
-    await window.ohMyGameDesktop.openExternal(url);
-  } else {
-    window.open(url, "_blank", "noopener,noreferrer");
-  }
-}
-
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

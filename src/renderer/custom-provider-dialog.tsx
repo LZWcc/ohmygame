@@ -25,13 +25,20 @@ const emptyModel = (provider: Pick<SaveCustomProviderRequest, "api" | "preset">)
 
 export type CustomProviderField = "name" | "baseUrl" | "api" | "apiKey" | "models";
 
-export function CustomProviderDialog({ settings, initialProvider, initialFocus = "name", onClose, onSaved }: {
+type CustomProviderFormProps = {
   settings?: CustomProviderDetails;
   initialProvider?: Pick<SaveCustomProviderRequest, "name" | "baseUrl" | "api" | "authentication" | "preset">;
   initialFocus?: CustomProviderField;
   onClose: () => void;
   onSaved: (settings: CustomProviderDetails) => void;
-}) {
+  onSavingChange?: (saving: boolean) => void;
+};
+
+export function CustomProviderDialog(props: CustomProviderFormProps) {
+  return <CustomProviderForm {...props} modal />;
+}
+
+export function CustomProviderForm({ settings, initialProvider, initialFocus = "name", onClose, onSaved, onSavingChange, modal = false }: CustomProviderFormProps & { modal?: boolean }) {
   const titleId = useId();
   const dialog = useRef<HTMLElement>(null);
   const nameInput = useRef<HTMLInputElement>(null);
@@ -79,7 +86,7 @@ export function CustomProviderDialog({ settings, initialProvider, initialFocus =
         event.stopPropagation();
         if (!savingRef.current) closeRef.current();
       }
-      if (event.key !== "Tab" || !dialog.current) return;
+      if (!modal || event.key !== "Tab" || !dialog.current) return;
       const elements = [...dialog.current.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, [tabindex='0']")].filter((element) => element.getClientRects().length > 0);
       const first = elements[0];
       const last = elements.at(-1);
@@ -88,7 +95,7 @@ export function CustomProviderDialog({ settings, initialProvider, initialFocus =
       else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     };
     window.addEventListener("keydown", keyboard, true);
-    return () => { discovery.current?.abort(); window.removeEventListener("keydown", keyboard, true); previousFocus?.focus(); };
+    return () => { discovery.current?.abort(); window.removeEventListener("keydown", keyboard, true); if (modal) previousFocus?.focus(); };
   }, []);
 
   function cancelDiscovery(): void {
@@ -163,6 +170,7 @@ export function CustomProviderDialog({ settings, initialProvider, initialFocus =
     cancelDiscovery();
     savingRef.current = true;
     setSaving(true);
+    onSavingChange?.(true);
     setError(undefined);
     try {
       const saved = await saveCustomProvider({
@@ -171,11 +179,15 @@ export function CustomProviderDialog({ settings, initialProvider, initialFocus =
         apiKey: form.authentication === "api_key" ? form.apiKey : undefined,
         models, hiddenModelIds: rows.filter((row) => !row.enabled).map((row) => row.model.id),
       }, settings?.id);
+      savingRef.current = false;
+      setSaving(false);
+      onSavingChange?.(false);
       onSaved(saved);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       savingRef.current = false;
       setSaving(false);
+      onSavingChange?.(false);
     }
   }
 
@@ -185,9 +197,8 @@ export function CustomProviderDialog({ settings, initialProvider, initialFocus =
   const configuredModels = visibleModels.filter((row) => modelUsageList(row.model).length);
   const allVisibleEnabled = configuredModels.length > 0 && configuredModels.every((row) => row.enabled);
 
-  return createPortal(<div className="project-settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingRef.current) onClose(); }}>
-    <section ref={dialog} className="project-settings-dialog custom-provider-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
-      <header><h2 id={titleId}>{settings ? "Edit provider" : initialProvider ? `Connect ${initialProvider.name}` : "Add provider"}</h2><button type="button" disabled={saving} aria-label="Close" onClick={onClose}><X size={16} /></button></header>
+  const content = <section ref={dialog} className={`project-settings-dialog custom-provider-dialog${modal ? "" : " custom-provider-form"}`} role={modal ? "dialog" : "region"} aria-modal={modal ? true : undefined} aria-labelledby={modal ? titleId : undefined} aria-label={modal ? undefined : "Custom provider"} tabIndex={modal ? -1 : undefined}>
+      {modal ? <header><h2 id={titleId}>{settings ? "Edit provider" : initialProvider ? `Connect ${initialProvider.name}` : "Add provider"}</h2><button type="button" disabled={saving} aria-label="Close" onClick={onClose}><X size={16} /></button></header> : null}
       <form noValidate onSubmit={(event) => void submit(event)}>
         <div className="custom-provider-dialog-body">
           <fieldset className="project-settings-section" disabled={saving}>
@@ -236,8 +247,8 @@ export function CustomProviderDialog({ settings, initialProvider, initialFocus =
         </div>
         <footer><button type="button" disabled={saving} onClick={onClose}>Cancel</button><button className="project-settings-submit" type="submit" disabled={saving}>{saving ? <LoaderCircle className="spin" size={14} /> : null}{saving ? "Saving…" : settings ? "Save changes" : initialProvider ? "Connect" : "Add provider"}</button></footer>
       </form>
-    </section>
-  </div>, document.body);
+    </section>;
+  return modal ? createPortal(<div className="project-settings-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !savingRef.current) onClose(); }}>{content}</div>, document.body) : content;
 }
 
 function ModelFields({ model, preset, onChange, disabled }: { model: CustomProviderModel; preset?: CustomProviderPreset; onChange: (model: CustomProviderModel) => void; disabled: boolean }) {

@@ -30,6 +30,14 @@ daemon itself on an available loopback port, waits for `/health`, and passes
 the daemon address plus a random process-scoped token through the isolated
 preload bridge. The renderer has no Node.js access.
 
+The main desktop window starts at 1200 × 780 logical pixels, centered on the
+display containing the pointer. It fits within 90% of that display's available
+width and 88% of its available height, excluding system panels and the Dock.
+Its usual minimum is 960 × 640; smaller displays lower the minimum to fit the
+initial window. First-run setup shares this window with the home screen, so
+finishing setup does not resize it. Playtest and capture windows keep their
+explicit content dimensions.
+
 Bun 1.4.2 installs dependencies and executes builds, tests, and most preparation
 scripts. Pinned Plugin archives are prepared with Node and store their entries
 uncompressed, so their locked ZIP checksums do not depend on the zlib build;
@@ -63,6 +71,51 @@ See [preview isolation and service recovery](runtime-recovery.md) for behavior,
 recovery limits, and validation scenarios.
 See [preview configuration and lifecycle](preview-runtime.md) for startup modes,
 automatic policy, idle collection, logs, and browser storage.
+
+## First-run setup
+
+The home route reads the daemon's `/settings/onboarding` preference before
+opening the studio. The daemon stores version 1 state in `onboarding.json`
+under its data directory: `status` is `pending`, `completed`, or `skipped`,
+and `step` is `welcome` or `connect`. Atomic, serialized writes retain the
+current step across restarts. Completing setup requires a language model in
+the same enabled, visible catalog used by the home composer. This checks
+configuration and catalog availability, without sending an inference request.
+The provider screen enables **Start creating** only when a language model is
+available; it records `completed`. The separate **Skip and start** action
+is a text button without a hover background. It records `skipped` and allows
+configuration later in Settings. **Next** and the provider screen's actions
+sit near the bottom, above the step indicators. Saved built-in
+and custom connections show **Connected** instead of offering setup again.
+Disabled connections offer **Enable** without changing credentials. Before
+starting or retrying setup, the renderer refreshes the provider's saved state to avoid
+reopening a connection that changed since the list loaded. Existing provider
+credentials and models can be edited from Settings.
+
+An installation with no preference but existing projects or a configured
+language provider is marked completed once. Media credentials alone do not
+count as language setup. A saved completion or skip remains valid if providers
+are later removed. Damaged preferences are logged and reinitialized rather
+than blocking project access. Project links, playtest windows, and thumbnail
+renderers do not pass through the home gate.
+
+**Settings → About → View getting started** reopens the welcome. Moving to the
+connection step with **Next** saves a pending preference again. The two bottom
+step indicators are buttons for switching between the welcome and provider
+screens. Selecting the provider step also returns from its inline forms to
+the provider list. Step navigation is disabled while saving. The welcome's
+illustration plays once per visit in 5.2 seconds. Only the forming game world
+is visible at first: terrain rises, paths unfold, water reshapes, and trees
+grow in sequence. Its outline then morphs into a small OhMyGame logo beside
+the wordmark, followed by **Your own game studio.** and **Next**. Hidden
+controls stay out of keyboard navigation. Reduced-motion preferences show the
+final logo, title, and controls immediately. The connection screen reuses
+the daemon's provider authentication flow and custom-provider form; it does
+not require an OhMyGame cloud account. The add button beside provider search
+opens that form inline. Settings uses the same form in its existing dialog.
+Saving or cancelling returns to the provider list without adding a persisted
+setup step. Image, video, and 3D connections and default models are configured
+in Settings and do not change the language-only completion requirement.
 
 ## Network proxy
 

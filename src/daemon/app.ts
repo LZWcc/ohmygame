@@ -9,6 +9,8 @@ import { sniffImageType } from "./image-format.js";
 import { createHash, randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { OnboardingStore } from "./onboarding.js";
+import type { UpdateOnboardingRequest } from "../shared/onboarding.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -530,6 +532,7 @@ export function createApp(options: AppOptions = {}) {
   });
   const previews = new PreviewManager(events);
   const webSearchSettings = new WebSearchSettingsStore(dataDirectory);
+  const onboarding = new OnboardingStore(dataDirectory);
   const networkSettings = options.networkSettings ?? new NetworkSettingsService(dataDirectory);
   const meshySettings = new MediaProviderKeyStore(dataDirectory, "meshy", "Meshy");
   const tripoSettings = new MediaProviderKeyStore(dataDirectory, "tripo", "Tripo");
@@ -775,6 +778,8 @@ export function createApp(options: AppOptions = {}) {
 
   app.addHook("onReady", async () => {
     await networkSettings.load();
+    // A damaged welcome preference must not prevent projects from opening.
+    await onboarding.load().catch((err) => app.log.warn({ err }, "Could not load onboarding state"));
     await Promise.all([library.load(), projects.load((projectDirectory, cause) => {
       app.log.warn({ err: cause, projectDirectory }, "Could not load project; skipped during startup");
     }), tools.load(), pluginSettings.load(), pluginCapabilities.configuration.load(), bundledPlugins.load(), preinstalledPlugins.load(), webSearchSettings.load(), openAIEndpoint.load(), meshySettings.load(), tripoSettings.load(), hyper3dSettings.load(), seedanceSettings.load(), providerModelSettings.load()]);
@@ -1941,6 +1946,31 @@ export function createApp(options: AppOptions = {}) {
     return [...providers, ...directProviders, ...await cloudModels.providers(providerEnabled)].sort((left, right) => left.name.localeCompare(right.name));
   };
   app.get("/settings/providers", providerSummaries);
+  app.get("/settings/onboarding", async () => {
+    if (!onboarding.initialized) {
+      const existingSetup = projects.list().length > 0 || (await providerSummaries())
+        .some((provider) => provider.configured && provider.capabilities.some((capability) => capability === "language"));
+      // Installations from before onboarding have no flag. Preserve their normal startup.
+      await onboarding.initialize(existingSetup
+        ? { status: "completed", step: "connect" }
+        : { status: "pending", step: "welcome" });
+    }
+    return onboarding.get();
+  });
+  app.put<{ Body: UpdateOnboardingRequest }>("/settings/onboarding", {
+    schema: { body: {
+      type: "object", additionalProperties: false, required: ["status", "step"],
+      properties: { status: { enum: ["pending", "completed", "skipped"] }, step: { enum: ["welcome", "connect"] } },
+    } },
+  }, async (request, reply) => {
+    if (request.body.status === "completed") {
+      const runtime = await getModelRuntime();
+      const available = resolveModels(runtime, (await runtime.getAvailable()).filter((model) => providerEnabled(model.provider)))
+        .filter((model) => providerModelSettings.isVisible(model));
+      if (!available.length) return reply.code(409).send({ error: "Connect a language model before completing setup." });
+    }
+    return onboarding.update(request.body);
+  });
   app.put<{ Body: { accessToken: string; userId: string } | null }>("/cloud/session", {
     schema: { body: { anyOf: [{ type: "null" }, { type: "object", additionalProperties: false, required: ["accessToken", "userId"], properties: {
       accessToken: { type: "string", minLength: 1, maxLength: 16_384 }, userId: { type: "string", minLength: 1, maxLength: 128 },
