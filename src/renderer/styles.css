@@ -4512,7 +4512,7 @@ button.home-nav-item-active:hover {
   font-size: 11px;
   font-weight: 500;
 }
-.publish-dialog input:not([type="file"]),
+.publish-dialog input:not([type="file"], [type="checkbox"]),
 .publish-dialog textarea {
   width: 100%;
   padding: 0 10px;
@@ -4524,7 +4524,7 @@ button.home-nav-item-active:hover {
   font: inherit;
   font-size: 12px;
 }
-.publish-dialog input:not([type="file"]) {
+.publish-dialog input:not([type="file"], [type="checkbox"]) {
   height: 38px;
 }
 .publish-dialog textarea {
@@ -4588,10 +4588,36 @@ button.home-nav-item-active:hover {
   justify-content: space-between;
   gap: 7px;
 }
-.publish-cover-heading > span {
+.publish-cover-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.publish-cover-label > span {
   color: var(--text-faint);
   font-size: 10px;
   font-weight: 400;
+}
+.publish-dialog .publish-cover-automatic {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font-size: 10px;
+}
+.publish-cover-automatic:has(:disabled) {
+  cursor: default;
+  opacity: 0.45;
+}
+.publish-cover-automatic .settings-toggle {
+  cursor: inherit;
+}
+.publish-cover-automatic input:focus-visible + span {
+  outline: 2px solid var(--composer-accent);
+  outline-offset: 3px;
 }
 .publish-cover-controls {
   justify-content: flex-end;

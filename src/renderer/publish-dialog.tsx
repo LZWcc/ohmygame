@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ProjectCoverMode, ProjectState, PublicationState } from "../shared/contracts.js";
-import { getExploreGameCover, getProjectCover, getProjectCoverState, restoreAutomaticProjectCover, setProjectCover } from "./api.js";
+import { getExploreGameCover, getProjectCover, getProjectCoverState, setProjectCoverMode, setProjectCover } from "./api.js";
 import { imageToWebP } from "./image.js";
 import { Check, Copy, ExternalLink, Image, InfoCircle, LoaderCircle, RefreshCw, Upload, X } from "./icons.js";
 import { localDebug } from "./auth.js";
@@ -30,7 +30,7 @@ export function PublishDialog({ project, publishing, justPublished = false, onCl
   const [coverMode, setCoverMode] = useState<ProjectCoverMode>();
   const coverUrl = useCoverUrl(pendingCover ?? savedCover);
   const [coverLoading, setCoverLoading] = useState(true);
-  const [coverOperation, setCoverOperation] = useState<"process" | "apply" | "restore">();
+  const [coverOperation, setCoverOperation] = useState<"process" | "apply" | "mode">();
   const [coverNotice, setCoverNotice] = useState<string>();
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
@@ -123,7 +123,7 @@ export function PublishDialog({ project, publishing, justPublished = false, onCl
       setSavedCover(nextCover);
       setPendingCover(undefined);
       setCoverMode("custom");
-      setCoverNotice("Cover applied. Automatic replacement is off.");
+      setCoverNotice("Cover applied.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -131,17 +131,16 @@ export function PublishDialog({ project, publishing, justPublished = false, onCl
     }
   }
 
-  async function restoreCover(): Promise<void> {
-    if (busy) return;
-    setCoverOperation("restore");
+  async function toggleAutomaticCover(): Promise<void> {
+    if (busy || coverLoading || pendingCover || !coverMode) return;
+    const nextMode = coverMode === "auto" ? "custom" : "auto";
+    setCoverOperation("mode");
     setError(undefined);
     setCoverNotice(undefined);
     try {
-      await restoreAutomaticProjectCover(project.id);
-      setCoverMode("auto");
-      setSavedCover(undefined);
+      await setProjectCoverMode(project.id, nextMode);
+      setCoverMode(nextMode);
       setSavedCover(await getProjectCover(project.id));
-      setCoverNotice("Automatic cover restored.");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -184,10 +183,15 @@ export function PublishDialog({ project, publishing, justPublished = false, onCl
         }}
       /> : <form onSubmit={(event) => void submit(event)}>
         <div className="publish-cover-field">
+          <div className="publish-cover-heading">
+            <span className="publish-cover-label">Cover{pendingCover ? <span>Not applied</span> : null}</span>
+            <label className="publish-cover-automatic" title="Update the cover automatically with your project preview">
+              Automatic<span className="settings-toggle"><input type="checkbox" role="switch" aria-label="Automatic cover" checked={coverMode === "auto"} disabled={busy || coverLoading || Boolean(pendingCover) || !coverMode} onChange={() => void toggleAutomaticCover()} /><span aria-hidden="true" /></span>
+            </label>
+          </div>
           <label htmlFor={coverInputId}>
-            <span className="publish-cover-heading">Cover{pendingCover ? <span>Not applied</span> : coverMode ? <span>{coverMode === "custom" ? "Custom" : "Automatic"}</span> : null}</span>
             <span className="publish-cover-preview">
-              {coverUrl ? <img src={coverUrl} alt="Game cover preview" /> : <span>{coverLoading ? <LoaderCircle className="spin" size={22} /> : <Image size={22} />}{coverLoading ? "Loading cover..." : "The preview is captured automatically"}</span>}
+              {coverUrl ? <img src={coverUrl} alt="Game cover preview" /> : <span>{coverLoading ? <LoaderCircle className="spin" size={22} /> : <Image size={22} />}{coverLoading ? "Loading cover..." : coverMode === "custom" ? "No cover selected" : "The preview is captured automatically"}</span>}
               <span className="publish-cover-action"><Upload size={14} />Replace cover</span>
             </span>
           </label>
@@ -198,10 +202,8 @@ export function PublishDialog({ project, publishing, justPublished = false, onCl
           {pendingCover ? <div className="publish-cover-controls">
             <button type="button" disabled={busy} onClick={() => { setPendingCover(undefined); setError(undefined); setCoverNotice(undefined); }}>Cancel selection</button>
             <button className="project-create-submit" type="button" disabled={busy} onClick={() => void applyCover()}>{coverOperation === "apply" ? <LoaderCircle className="spin" size={14} /> : <Check size={14} />}Apply cover</button>
-          </div> : coverMode === "custom" ? <div className="publish-cover-controls">
-            <button type="button" disabled={busy || coverLoading} onClick={() => void restoreCover()}><RefreshCw className={coverOperation === "restore" ? "spin" : undefined} size={14} />Restore automatic cover</button>
           </div> : null}
-          <p className="publish-cover-status" role="status">{pendingCover ? "Apply or cancel the selected cover before publishing." : coverNotice ?? (coverMode === "custom" ? "Automatic replacement is off." : "The cover updates automatically with your project preview.")}</p>
+          <p className={`publish-cover-status${pendingCover || coverNotice ? "" : " visually-hidden"}`} role="status">{pendingCover ? "Apply or cancel the selected cover before publishing." : coverNotice}</p>
           {project.publication ? <p className="publish-cover-status">This is your local project cover. Publish an update to change the Community cover.</p> : null}
         </div>
         <label><span>Name</span><input ref={titleInput} value={title} maxLength={200} disabled={busy} required onChange={(event) => setTitle(event.target.value)} /></label>
