@@ -20,6 +20,7 @@ import { PROVIDER_ICONS } from "./provider-icons.js";
 import { useReadyRuntimeGeneration } from "./runtime-connection.js";
 import { WindowDragRegion } from "./window-drag-region.js";
 import { OnboardingDemo } from "./onboarding-demo.js";
+import { t } from "./i18n.js";
 import "./onboarding.css";
 
 type Connection = { provider: ProviderSummary; method: ModelAuthMethod };
@@ -110,7 +111,7 @@ export function Onboarding({
     const latest = await listProviders();
     setProviders(latest);
     const current = latest.find((item) => item.id === provider.id);
-    if (!current) throw new Error("This provider is no longer available.");
+    if (!current) throw new Error(t("onboarding.providerUnavailable"));
     if (current.configured) {
       if (current.enabled === false) await setProviderEnabled(current.id, true);
       setRefresh((value) => value + 1);
@@ -152,7 +153,9 @@ export function Onboarding({
   const connectionContent = adding ? (
     <>
       <h1 ref={heading} tabIndex={-1}>
-        {customSettings ? "Edit your provider." : "Add your provider."}
+        {customSettings
+          ? t("onboarding.editProvider")
+          : t("onboarding.addProvider")}
       </h1>
       <CustomProviderForm
         settings={customSettings}
@@ -167,12 +170,12 @@ export function Onboarding({
   ) : connection ? (
     <>
       <h1 ref={heading} tabIndex={-1}>
-        Connect {connection.provider.name}.
+        {t("onboarding.connectProvider", { name: connection.provider.name })}
       </h1>
       <p className="onboarding-lede">
         {connection.method === "oauth"
-          ? "Finish signing in in your browser, then come back here."
-          : "Your key stays on this machine."}
+          ? t("providers.finishInBrowser")
+          : t("onboarding.keyLocal")}
       </p>
       <div className="onboarding-auth">
         <ActiveProviderAuth
@@ -194,12 +197,12 @@ export function Onboarding({
   ) : (
     <>
       <h1 ref={heading} tabIndex={-1}>
-        Choose your provider.
+        {t("onboarding.chooseProvider")}
       </h1>
       {phase === "loading" ? (
         <p className="onboarding-status" role="status">
           <LoaderCircle className="spin" size={16} />
-          Loading providers…
+          {t("onboarding.loadingProviders")}
         </p>
       ) : null}
       {phase !== "loading" ? (
@@ -220,14 +223,11 @@ export function Onboarding({
       {model ? (
         <p className="onboarding-ready" role="status">
           <Check size={16} />
-          Ready with {model.name}
+          {t("onboarding.readyWith", { name: model.name })}
         </p>
       ) : phase === "ready" &&
         languageProviders.some((provider) => provider.configured) ? (
-        <p className="onboarding-lede">
-          Choose a provider with an enabled language model, or add one in
-          Settings.
-        </p>
+        <p className="onboarding-lede">{t("onboarding.needsLanguageModel")}</p>
       ) : null}
     </>
   );
@@ -235,7 +235,7 @@ export function Onboarding({
   return (
     <main
       className={`onboarding onboarding-${step}${adding ? " onboarding-custom" : ""}`}
-      aria-label="Welcome to OhMyGame"
+      aria-label={t("onboarding.welcome")}
       aria-busy={busy}
     >
       <WindowDragRegion />
@@ -252,7 +252,7 @@ export function Onboarding({
                   event.currentTarget.focus({ preventScroll: true });
               }}
             >
-              Your own game studio.
+              {t("onboarding.tagline")}
             </h1>
           </>
         ) : (
@@ -276,7 +276,7 @@ export function Onboarding({
                 }
               }}
             >
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         ) : null}
@@ -290,7 +290,7 @@ export function Onboarding({
               disabled={busy}
               onClick={() => navigate("connect")}
             >
-              Next
+              {t("onboarding.next")}
             </button>
           ) : (
             <>
@@ -302,7 +302,7 @@ export function Onboarding({
                   if (model) void run(() => onFinish("completed"));
                 }}
               >
-                Start creating
+                {t("onboarding.startCreating")}
               </button>
               <button
                 className="onboarding-text-button onboarding-skip-button"
@@ -310,19 +310,29 @@ export function Onboarding({
                 disabled={busy}
                 onClick={() => void run(() => onFinish("skipped"))}
               >
-                Skip and start
+                {t("onboarding.skipAndStart")}
               </button>
             </>
           )}
         </footer>
       ) : null}
-      <nav className="onboarding-progress" aria-label="Getting started">
+      <nav
+        className="onboarding-progress"
+        aria-label={t("onboarding.gettingStarted")}
+      >
         {(["welcome", "connect"] as const).map((target, index) => (
           <button
             key={target}
             className={step === target ? "is-current" : undefined}
             type="button"
-            aria-label={`Step ${index + 1} of 2: ${target === "welcome" ? "Welcome" : "Choose your provider"}`}
+            aria-label={t("onboarding.step", {
+              number: index + 1,
+              title: t(
+                target === "welcome"
+                  ? "onboarding.welcomeStep"
+                  : "onboarding.providerStep",
+              ),
+            })}
             aria-current={step === target ? "step" : undefined}
             disabled={busy}
             onClick={() => navigate(target)}
@@ -371,8 +381,8 @@ function ProviderPicker({
           <Search size={16} aria-hidden="true" />
           <input
             type="search"
-            aria-label="Search providers"
-            placeholder="Search providers…"
+            aria-label={t("providers.search")}
+            placeholder={t("onboarding.searchProviders")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -380,8 +390,8 @@ function ProviderPicker({
         <button
           className="onboarding-text-button onboarding-add-provider"
           type="button"
-          aria-label="Add custom provider"
-          title="Add custom provider"
+          aria-label={t("onboarding.addCustomProvider")}
+          title={t("onboarding.addCustomProvider")}
           disabled={busy}
           onClick={onAdd}
         >
@@ -412,9 +422,9 @@ function ProviderPicker({
                 >
                   {provider.configured
                     ? provider.enabled === false
-                      ? "Enable"
-                      : "Connected"
-                    : "Configure"}
+                      ? t("common.enable")
+                      : t("providers.status.connected")
+                    : t("onboarding.configure")}
                 </button>
               ) : (
                 provider.methods.map((method) => (
@@ -425,7 +435,9 @@ function ProviderPicker({
                     disabled={busy}
                     onClick={() => onChoose(provider, method.type)}
                   >
-                    {method.type === "oauth" ? "Sign in" : "API key"}
+                    {method.type === "oauth"
+                      ? t("common.signIn")
+                      : t("providers.apiKey")}
                   </button>
                 ))
               )}
@@ -433,7 +445,7 @@ function ProviderPicker({
           </div>
         ))}
         {!visible.length ? (
-          <p className="onboarding-lede">No matching providers.</p>
+          <p className="onboarding-lede">{t("onboarding.noProviders")}</p>
         ) : null}
       </div>
     </div>
@@ -450,7 +462,7 @@ export function OnboardingLoading({
   return (
     <main
       className="onboarding onboarding-loading"
-      aria-label="Preparing OhMyGame"
+      aria-label={t("onboarding.preparing")}
     >
       <WindowDragRegion />
       {error ? (
@@ -463,13 +475,13 @@ export function OnboardingLoading({
             type="button"
             onClick={onRetry}
           >
-            Retry
+            {t("common.retry")}
           </button>
         </>
       ) : (
         <p className="onboarding-status" role="status">
           <LoaderCircle className="spin" size={16} />
-          Getting ready…
+          {t("onboarding.gettingReady")}
         </p>
       )}
     </main>

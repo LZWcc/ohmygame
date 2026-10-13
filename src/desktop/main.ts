@@ -13,6 +13,7 @@ import { SYSTEM_PROXY_TARGET } from "../shared/network-settings.js";
 import { createNetworkDispatcher } from "../daemon/proxy.js";
 import { electronProxyConfig, prepareDesktopNetwork, proxyCredentials } from "./network.js";
 import { loadEnvironmentFiles } from "../daemon/environment.js";
+import { ignoreBrokenStdio } from "./stdio.js";
 import { createDesktopWindow, fitPlaytestContentSize, isValidPlaytestViewport, waitForRenderer, windowsTitleBarOverlay } from "./window.js";
 import { DesktopUpdatePreparationError, DesktopUpdater } from "./updater.js";
 import { ElectronPlaytestDriver } from "./playtest-driver.js";
@@ -22,6 +23,8 @@ import { AsyncTaskPool } from "./async-task-pool.js";
 import { PROJECT_FILE_OPEN_MODES, type ProjectFileOpenMode } from "../shared/contracts.js";
 import type { PlaytestWatchState } from "../shared/playtest.js";
 import type { WebGamePlayerRequest, WebGamePreviewLayout } from "../shared/web-game-player.js";
+
+ignoreBrokenStdio();
 
 const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(moduleDirectory, "../..");

@@ -21,6 +21,8 @@ import {
   type ModelAuthEvent,
   type ModelAuthMethod,
   type ModelProviderEndpointSettings,
+  type ResponsesTransportSettings,
+  type ResponsesTransportMode,
   type ProviderModelSettings,
   type Model3DDefinition,
   type CustomProviderModel,
@@ -74,6 +76,7 @@ import type { WebGamePlayerBridge } from "../shared/web-game-player.js";
 import type { NetworkConnectionTest, NetworkSettings, NetworkSettingsState } from "../shared/network-settings.js";
 import { composerDrafts } from "./composer-drafts.js";
 import type { OnboardingState, UpdateOnboardingRequest } from "../shared/onboarding.js";
+import { t } from "./i18n.js";
 
 const API_BASE = "/api";
 
@@ -309,6 +312,13 @@ export async function getOpenAIEndpointSettings(): Promise<ModelProviderEndpoint
   return request("/settings/models/providers/openai/endpoint");
 }
 
+export async function getResponsesTransport(provider: string): Promise<ResponsesTransportSettings> {
+  return request(`/settings/models/providers/${encodeURIComponent(provider)}/transport`);
+}
+export async function updateResponsesTransport(provider: string, mode: ResponsesTransportMode): Promise<ResponsesTransportSettings> {
+  return request(`/settings/models/providers/${encodeURIComponent(provider)}/transport`, { method: "PUT", body: JSON.stringify({ mode }) });
+}
+
 export async function updateOpenAIEndpointSettings(baseUrl: string): Promise<ModelProviderEndpointSettings> {
   return request("/settings/models/providers/openai/endpoint", {
     method: "PUT",
@@ -496,7 +506,7 @@ export async function waitForRuntime(timeoutMs = 10_000): Promise<void> {
       await delay(200);
     }
   }
-  throw new Error("Could not reach the local runtime");
+  throw new Error(t("api.runtimeUnreachable"));
 }
 
 export async function getProject(projectId: string): Promise<ProjectState> {
@@ -589,8 +599,8 @@ export async function setProjectCover(projectId: string, cover: Blob, source: Pr
   if (!response.ok) throw await responseError(response);
 }
 
-export async function restoreAutomaticProjectCover(projectId: string): Promise<void> {
-  await request(`/projects/${projectId}/cover`, { method: "DELETE" });
+export async function setProjectCoverMode(projectId: string, mode: ProjectCoverMode): Promise<void> {
+  await request(`/projects/${projectId}/cover/state`, { method: "PUT", body: JSON.stringify({ mode }) });
 }
 
 export async function listWorkspaceFiles(projectId: string): Promise<WorkspaceFile[]> {
@@ -884,7 +894,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 async function responseError(response: Response): Promise<ApiError> {
   const body = await response.json().catch(() => ({})) as { error?: string; message?: string; code?: string };
-  return new ApiError(body.message ?? body.error ?? `Request failed with ${response.status}`, response.status, body.code);
+  return new ApiError(body.message ?? body.error ?? t("api.requestFailed", { status: response.status }), response.status, body.code);
 }
 
 async function streamProjectEvents(
@@ -906,7 +916,7 @@ async function streamProjectEvents(
     const connectionSignal = AbortSignal.any([signal, connection.signal]);
     try {
       const current = runtimeConnection();
-      if (current.status !== "ready") throw new Error("Background service unavailable");
+      if (current.status !== "ready") throw new Error(t("api.serviceUnavailable"));
       if (current.generation !== generation) {
         generation = current.generation;
         cursor = handlers.onReset ? await handlers.onReset() : 0;
@@ -1082,7 +1092,7 @@ function desktopRuntime(): DesktopRuntime | undefined {
   const desktop = window.ohMyGameDesktop;
   if (!desktop) return;
   const state = runtimeConnection();
-  if (state.status !== "ready") throw new Error("The background service is unavailable. Wait for recovery or restart it.");
+  if (state.status !== "ready") throw new Error(t("api.serviceUnavailableLong"));
   return state.runtime ? { daemonUrl: state.runtime.url, token: state.runtime.token } : desktop.runtime;
 }
 

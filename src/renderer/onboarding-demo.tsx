@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import { t } from "./i18n.js";
 
 // Matching cubic segments morph the island into ohmygame-mark-v2.svg at 144px wide.
 const ISLAND_OUTLINE =
@@ -11,7 +12,7 @@ export function OnboardingDemo() {
     <div
       className="onboarding-demo"
       role="img"
-      aria-label="A small game world forms, then transforms into the OhMyGame logo."
+      aria-label={t("onboarding.animation")}
       style={
         {
           "--demo-island-outline": `path("${ISLAND_OUTLINE}")`,

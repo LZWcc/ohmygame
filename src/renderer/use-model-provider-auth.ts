@@ -12,6 +12,7 @@ import {
   startModelProviderLogin,
   subscribeToModelAuth,
 } from "./api.js";
+import { t } from "./i18n.js";
 
 export async function openModelAuthExternal(url: string): Promise<void> {
   if (window.ohMyGameDesktop?.openExternal) {
@@ -105,7 +106,7 @@ export function useModelProviderAuth(options: {
       },
       onError: () => {
         if (active && operation.current === operationId)
-          fail("Connection to the authentication flow was interrupted.");
+          fail(t("providers.authInterrupted"));
       },
     });
     return () => {
