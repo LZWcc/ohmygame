@@ -203,8 +203,11 @@ OhMyGame ships without a model. Connect one before your first prompt:
    | Video                         | OpenRouter, or Volcengine Ark / BytePlus ModelArk                   |
    | 3D models, rigging, animation | Meshy                                                               |
 
-   Signing in with ChatGPT does not cover image generation. To use GPT Image,
-   connect OpenAI with an API key.
+   Signing in with ChatGPT does not cover image generation. In the OpenAI
+   provider's **Image models** section, configure a separate API key and Base URL,
+   fetch or manually add image models, enable them and save. This works alongside
+   browser sign-in and supports compatible GPT Image relays. API-key chat
+   connections can also share their key and endpoint with image generation.
 
 3. **Pick a model and describe your game.** Choose the model in the prompt box
    on the home screen, then describe what you want to make.
