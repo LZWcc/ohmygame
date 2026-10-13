@@ -112,7 +112,6 @@ declare global {
       onPrepareClose?: (listener: () => Promise<void>) => () => void;
       onCancelClose?: (listener: (error: string) => void) => () => void;
       windowMenu?: {
-        icon: () => Promise<string>;
         popup: (label: string, x: number, y: number) => Promise<void>;
       };
       openProjectFile: (projectId: string, filePath: string, mode?: ProjectFileOpenMode) => Promise<void>;

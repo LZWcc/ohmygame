@@ -1,4 +1,5 @@
-import { useEffect, useState, type MouseEvent, type ReactNode } from "react";
+import { type MouseEvent, type ReactNode } from "react";
+import appIcon from "../../build/icon-windows.svg";
 import { t } from "./i18n.js";
 
 const WINDOW_MENU_LABELS = ["File", "Edit", "View", "Window"] as const;
@@ -15,15 +16,6 @@ export function DesktopWindowFrame({ children }: { children: ReactNode }) {
 
 function DesktopWindowMenu() {
   const windowMenu = window.ohMyGameDesktop!.windowMenu!;
-  const [icon, setIcon] = useState<string>();
-
-  useEffect(() => {
-    let disposed = false;
-    void windowMenu.icon().then((url) => {
-      if (!disposed) setIcon(url);
-    }).catch(() => undefined);
-    return () => { disposed = true; };
-  }, [windowMenu]);
 
   function openMenu(label: typeof WINDOW_MENU_LABELS[number], event: MouseEvent<HTMLButtonElement>): void {
     const bounds = event.currentTarget.getBoundingClientRect();
@@ -32,7 +24,7 @@ function DesktopWindowMenu() {
 
   return <header className="desktop-window-menu-bar" role="menubar" aria-label={t("sidebar.applicationMenu")}>
     <span className="desktop-window-menu-icon" aria-hidden="true">
-      {icon ? <img src={icon} alt="" draggable={false} /> : null}
+      <img src={appIcon} alt="" draggable={false} />
     </span>
     {WINDOW_MENU_LABELS.map((label) => <button
       type="button"
