@@ -879,7 +879,11 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
 
   const onNodesChange = useCallback((changes: NodeChange<AssetCanvasFlowNode>[]) => {
     const copies = altDragCopies.current;
-    const moves = copies ? changes.map((change) => change.type === "position" && copies.has(change.id) ? { ...change, id: copies.get(change.id)! } : change) : changes;
+    const moves = copies ? changes.flatMap<NodeChange<AssetCanvasFlowNode>>((change) => {
+      if (change.type !== "position") return [change];
+      const id = copies.get(change.id);
+      return id ? [{ ...change, id }] : [];
+    }) : changes;
     setNodes((current) => applyNodeChanges(moves, current));
   }, []);
   function onEdgesChange(changes: EdgeChange[]): void {
@@ -1075,7 +1079,10 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   }
 
   function startAltDragDuplicate(dragged: readonly AssetCanvasFlowNode[]): void {
+    // A rejected copy gesture must not fall back to moving the originals.
+    altDragCopies.current = new Map();
     if (nodesRef.current.length + dragged.length > MAX_ASSET_CANVAS_NODES) { setTransferError(t("assetCanvas.nodeLimit")); return; }
+    setTransferError(undefined);
     const copies = dragged.map((node) => {
       const source = toAssetCanvasNode(node, model3DModels);
       return { ...toFlowNode(duplicateAssetCanvasNode(source, source.position), imageModels, videoModels), selected: true };
@@ -1089,7 +1096,7 @@ export function CanvasBoardEditor({ project, initialNodeId, onInitialNodeHandled
   function finishAltDragDuplicate(dragged: readonly AssetCanvasFlowNode[]): void {
     const copies = altDragCopies.current;
     altDragCopies.current = undefined;
-    if (!copies) return;
+    if (!copies?.size) return;
     const start = new Map(nodesRef.current.map((node) => [node.id, node.position]));
     if (dragged.some((node) => node.position.x !== start.get(node.id)?.x || node.position.y !== start.get(node.id)?.y)) return;
     const copyIds = new Set(copies.values());

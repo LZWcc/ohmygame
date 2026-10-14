@@ -9,6 +9,7 @@ import type { CanvasBoardStorage } from "../src/renderer/canvas-board-storage.js
 import type { CanvasDocuments } from "../src/renderer/canvas-document-node.js";
 import type { AssetCanvasDocument, AssetCanvasNode, ProjectState } from "../src/shared/contracts.js";
 import { createAssetCanvasDocument, createAssetGenerationNode, isAssetCanvasDocument } from "../src/shared/asset-canvas.js";
+import { MAX_ASSET_CANVAS_NODES } from "../src/shared/asset-canvas-schema.js";
 
 type CanvasProps = Parameters<typeof EditorCanvas<Node>>[0];
 const captured = { props: undefined as CanvasProps | undefined };
@@ -259,6 +260,34 @@ it("moves the node itself on a plain drag", async () => {
   expect(savedNode("image").position).toEqual({ x: 500, y: 0 });
   await shortcut("z");
   expect(flowNode("image").position).toEqual({ x: 400, y: 0 });
+});
+
+it.each([0, 1])("leaves the originals in place when an Option-drag exceeds the node limit with %i free slots", async (freeSlots) => {
+  const board = connectedBoard();
+  board.nodes.push(...Array.from({ length: MAX_ASSET_CANVAS_NODES - board.nodes.length - freeSlots }, (_, index): AssetCanvasNode => ({
+    id: `extra-${index}`, type: "text", position: { x: 0, y: 1000 }, data: { text: "", instruction: "" },
+  })));
+  await unmount();
+  await mount(board);
+  const before = nodeIds();
+  await act(async () => captured.props!.onNodesChange!(["image", "video"].map((id) => ({ type: "select", id, selected: true }))));
+
+  const gesture = await drag(["image", "video"], true);
+  await gesture.by(100, 100);
+  await gesture.drop();
+  await settle();
+  expect(nodeIds()).toEqual(before);
+  expect(flowNode("image").position).toEqual(original("image").position);
+  expect(flowNode("video").position).toEqual(original("video").position);
+  expect(container.textContent).toContain("A canvas can contain at most 2,000 nodes.");
+  expect(save).not.toHaveBeenCalled();
+  await shortcut("z");
+  expect(nodeIds()).toEqual(before);
+
+  const move = await drag(["image"], false);
+  await move.by(100, 0);
+  await move.drop();
+  expect(flowNode("image").position).toEqual({ x: 500, y: 0 });
 });
 
 describe("undo and redo pressed mid-drag", () => {
